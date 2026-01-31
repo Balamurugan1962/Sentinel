@@ -1,0 +1,10 @@
+[project]
+name = "sentinel"
+version = "0.1.0"
+description = "A secure lab monitoring daemon"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+]
