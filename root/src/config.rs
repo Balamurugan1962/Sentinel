@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::fs;
+use std::{fs, net::IpAddr, net::SocketAddr};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -7,10 +7,16 @@ pub struct Config {
     pub nodes: Vec<Node>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Node {
-    pub ip: String,
-    pub port: String,
+    pub ip: IpAddr,
+    pub port: u16,
+}
+
+impl Node {
+    pub fn socket_addr(&self) -> SocketAddr {
+        SocketAddr::new(self.ip, self.port)
+    }
 }
 
 pub fn load_config(file: &str) -> Config {
