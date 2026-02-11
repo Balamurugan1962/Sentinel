@@ -1,6 +1,8 @@
 #include "heartbeat.h"
 #include <stdio.h>
 #include <winsock2.h>
+#include "logger/logger.h"
+
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -18,10 +20,12 @@ void send_heartbeat(const char *ip, int port, const char *client_id) {
 
     if (connect(sock, (struct sockaddr *)&server, sizeof(server)) == 0) {
         send(sock, client_id, strlen(client_id), 0);
-        printf("[HEARTBEAT] Sent from %s\n", client_id);
-    } else {
-        printf("[HEARTBEAT] Root unreachable\n");
+        log_event("NETWORK", "heartbeat_sent", client_id);
+    } 
+    else {
+        log_event("NETWORK", "root_unreachable", ip);
     }
+
 
     closesocket(sock);
     WSACleanup();
