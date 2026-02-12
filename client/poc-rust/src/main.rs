@@ -59,11 +59,12 @@ async fn heartbeat_task(config: Config, tx: mpsc::Sender<Event>) {
             .format("%Y-%m-%d %H:%M:%S")
             .to_string();
 
-        let heartbeat_payload = serde_json::json!({
+        let heartbeat_payload = format!("Hello {}",config.client_id.to_string());
+        /*serde_json::json!({
             "type": "heartbeat",
             "client_id": config.client_id,
             "timestamp": timestamp
-        });
+        });*/
 
         match TcpStream::connect(&addr).await {
 

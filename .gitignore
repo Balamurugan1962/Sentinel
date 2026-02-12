@@ -1,1 +1,3 @@
 __pycache__
+root-rust/target
+client/poc-rust/target
