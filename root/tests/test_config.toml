@@ -1,0 +1,16 @@
+# Test config — uses port 19090 to avoid conflicts with the main server
+
+[root]
+id = 0
+ip = "127.0.0.1"
+port = 19090
+
+[[nodes]]
+id = 1
+ip = "127.0.0.1"
+port = 19091
+
+[[nodes]]
+id = 2
+ip = "127.0.0.1"
+port = 19092
