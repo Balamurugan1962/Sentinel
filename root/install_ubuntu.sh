@@ -6,11 +6,11 @@ BINARY_NAME="sentinel"
 INSTALL_DIR="$HOME/.local/bin"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-echo "──────── Sentinel Installer (Ubuntu/Linux) ────────"
+echo "### Sentinel Installer (Ubuntu/Linux)"
 
 # 1. Prerequisite Check
 if ! command -v cargo &> /dev/null; then
-    echo "ERROR: Rust/Cargo is not installed."
+    echo "Error: Rust/Cargo is not installed."
     echo "   Please install it first: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
     exit 1
 fi
@@ -31,10 +31,11 @@ echo "Installed to $INSTALL_DIR/$BINARY_NAME"
 SHELL_NAME=$(basename "$SHELL")
 PROFILE=""
 
+# On Ubuntu, .bashrc is preferred for interactive Bash shells. 
+# Zsh uses .zshrc.
 if [ "$SHELL_NAME" = "zsh" ]; then
     PROFILE="$HOME/.zshrc"
-elif ["$SHELL_NAME" = "bash" ]; then
-    # Prefer .bashrc for interactive shells on Ubuntu
+elif [ "$SHELL_NAME" = "bash" ]; then
     if [ -f "$HOME/.bashrc" ]; then
         PROFILE="$HOME/.bashrc"
     else
@@ -46,7 +47,7 @@ else
 fi
 
 if [ -f "$PROFILE" ] && grep -q "$INSTALL_DIR" "$PROFILE"; then
-    echo "PATH already configured in $PROFILE"
+    echo "Path already configured in $PROFILE"
 else
     echo "" >> "$PROFILE"
     echo "# Sentinel CLI" >> "$PROFILE"
@@ -55,7 +56,5 @@ else
 fi
 
 echo ""
-echo "Installation successful!"
+echo "Done!"
 echo "Restart your terminal or run: source $PROFILE"
-echo "Then verify with: sentinel --help"
-echo "───────────────────────────────────────────────────"

@@ -47,7 +47,11 @@ fn main() {
             }
             "--no-daemon" => no_daemon = true,
             "--config-print" => print_config = true,
-            _ => {}
+            _ => {
+                eprintln!("Error: Unknown argument '{}'\n", args[i]);
+                print_help();
+                return;
+            }
         }
         i += 1;
     }

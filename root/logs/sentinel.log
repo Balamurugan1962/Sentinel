@@ -79,3 +79,7 @@ note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 [2026-02-12 10:34:07] Root listening on 127.0.0.1:8080
 [2026-02-12 10:34:07] CLI socket listening on /tmp/sentinel.sock
 [2026-02-12 10:34:24] Shutdown requested via CLI
+[2026-02-12 11:01:32] Root listening on 127.0.0.1:8080
+[2026-02-12 11:01:32] CLI socket listening on /tmp/sentinel.sock
+[2026-02-12 11:08:41] Root listening on 127.0.0.1:8080
+[2026-02-12 11:08:41] CLI socket listening on /tmp/sentinel.sock
