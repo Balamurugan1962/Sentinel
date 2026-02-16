@@ -8,8 +8,6 @@ use std::thread;
 
 use chrono::Local;
 
-use crate::config::{Config, Node};
-
 pub const SOCKET_PATH: &str = "/tmp/sentinel.sock";
 
 type ActiveNodes = Arc<Mutex<HashMap<u32, NodeInfo>>>;
@@ -45,11 +43,10 @@ fn read_handshake_line(stream: &mut TcpStream) -> Option<String> {
     String::from_utf8(buf).ok()
 }
 
-pub fn start_server(addr: &str, config: Config) {
+pub fn start_server(addr: &str) {
     fs::create_dir_all("logs").ok();
 
     let active_nodes: ActiveNodes = Arc::new(Mutex::new(HashMap::new()));
-    let config_nodes = Arc::new(config.nodes);
 
     // CLI socket runs in its own thread so it can serve queries while the TCP
     // listener blocks on incoming node connections.
@@ -63,41 +60,24 @@ pub fn start_server(addr: &str, config: Config) {
         match stream {
             Ok(stream) => {
                 let nodes = Arc::clone(&active_nodes);
-                let cfg = Arc::clone(&config_nodes);
-                thread::spawn(move || handle_node(stream, nodes, cfg));
+                thread::spawn(move || handle_node(stream, nodes));
             }
             Err(e) => log_to_file("sentinel", &format!("Accept error: {}", e)),
         }
     }
 }
 
-// ─── Node handling ──────────────────────────────────────────────────────────
-
-fn handle_node(mut stream: TcpStream, active_nodes: ActiveNodes, config_nodes: Arc<Vec<Node>>) {
+fn handle_node(mut stream: TcpStream, active_nodes: ActiveNodes) {
     let peer_ip = match stream.peer_addr() {
         Ok(addr) => addr.ip(),
         Err(_) => return,
     };
-
-    // Reject IPs not present in the config
-    if !config_nodes.iter().any(|n| n.ip == peer_ip) {
-        log_to_file("unknown", &format!("Rejected unknown IP: {}", peer_ip));
-        let _ = stream.shutdown(std::net::Shutdown::Both);
-        return;
-    }
 
     // Handshake: client sends "HELLO <node_id>\n"
     let node_id = match parse_handshake(&mut stream, &peer_ip) {
         Some(id) => id,
         None => return,
     };
-
-    // Verify node ID + IP combination exists in config
-    if !config_nodes.iter().any(|n| n.id == node_id && n.ip == peer_ip) {
-        log_to_file("unknown", &format!("Node {} from {} not in config", node_id, peer_ip));
-        let _ = stream.shutdown(std::net::Shutdown::Both);
-        return;
-    }
 
     let log_target = node_id.to_string();
 
@@ -108,19 +88,28 @@ fn handle_node(mut stream: TcpStream, active_nodes: ActiveNodes, config_nodes: A
 
 fn parse_handshake(stream: &mut TcpStream, peer_ip: &std::net::IpAddr) -> Option<u32> {
     let line = read_handshake_line(stream).or_else(|| {
-        log_to_file("unknown", &format!("Handshake read failed from {}", peer_ip));
+        log_to_file(
+            "unknown",
+            &format!("Handshake read failed from {}", peer_ip),
+        );
         None
     })?;
 
     let parts: Vec<&str> = line.trim().split_whitespace().collect();
     if parts.len() != 2 || parts[0] != "HELLO" {
-        log_to_file("unknown", &format!("Malformed handshake from {}: {:?}", peer_ip, line));
+        log_to_file(
+            "unknown",
+            &format!("Malformed handshake from {}: {:?}", peer_ip, line),
+        );
         let _ = stream.shutdown(std::net::Shutdown::Both);
         return None;
     }
 
     parts[1].parse::<u32>().ok().or_else(|| {
-        log_to_file("unknown", &format!("Invalid node ID from {}: {}", peer_ip, parts[1]));
+        log_to_file(
+            "unknown",
+            &format!("Invalid node ID from {}: {}", peer_ip, parts[1]),
+        );
         None
     })
 }
@@ -129,17 +118,26 @@ fn register_node(active_nodes: &ActiveNodes, id: u32, ip: &str, log_target: &str
     let mut map = active_nodes.lock().unwrap();
 
     if map.contains_key(&id) {
-        log_to_file(log_target, &format!("Node {} reconnected, replacing old session", id));
+        log_to_file(
+            log_target,
+            &format!("Node {} reconnected, replacing old session", id),
+        );
         map.remove(&id);
     }
 
-    map.insert(id, NodeInfo {
+    map.insert(
         id,
-        ip: ip.to_string(),
-        connected_at: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
-    });
+        NodeInfo {
+            id,
+            ip: ip.to_string(),
+            connected_at: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        },
+    );
 
-    log_to_file(log_target, &format!("Node {} connected (active: {})", id, map.len()));
+    log_to_file(
+        log_target,
+        &format!("Node {} connected (active: {})", id, map.len()),
+    );
 }
 
 fn read_loop(stream: &mut TcpStream, node_id: u32, log_target: &str) {
@@ -165,7 +163,10 @@ fn read_loop(stream: &mut TcpStream, node_id: u32, log_target: &str) {
 fn unregister_node(active_nodes: &ActiveNodes, id: u32, log_target: &str) {
     let mut map = active_nodes.lock().unwrap();
     map.remove(&id);
-    log_to_file(log_target, &format!("Node {} removed (active: {})", id, map.len()));
+    log_to_file(
+        log_target,
+        &format!("Node {} removed (active: {})", id, map.len()),
+    );
 }
 
 // ─── CLI socket ─────────────────────────────────────────────────────────────
@@ -173,7 +174,10 @@ fn unregister_node(active_nodes: &ActiveNodes, id: u32, log_target: &str) {
 fn run_cli_socket(active_nodes: ActiveNodes) {
     let _ = fs::remove_file(SOCKET_PATH);
     let listener = UnixListener::bind(SOCKET_PATH).expect("Failed to bind CLI socket");
-    log_to_file("sentinel", &format!("CLI socket listening on {}", SOCKET_PATH));
+    log_to_file(
+        "sentinel",
+        &format!("CLI socket listening on {}", SOCKET_PATH),
+    );
 
     for stream in listener.incoming() {
         match stream {

@@ -6,7 +6,7 @@ use std::os::unix::net::UnixStream;
 use daemonize::Daemonize;
 
 use crate::config::load_config;
-use crate::server::{start_server, SOCKET_PATH};
+use crate::server::{SOCKET_PATH, start_server};
 
 mod config;
 mod server;
@@ -73,15 +73,15 @@ fn main() {
 
     if no_daemon {
         println!("Sentinel server starting in foreground on {}...", root_addr);
-        start_server(&root_addr, config);
+        start_server(&root_addr);
         return;
     }
 
     println!("Sentinel server starting on {}...", root_addr);
-    daemonize_and_start(&root_addr, config);
+    daemonize_and_start(&root_addr);
 }
 
-fn daemonize_and_start(addr: &str, config: crate::config::Config) {
+fn daemonize_and_start(addr: &str) {
     std::fs::create_dir_all("logs").ok();
 
     let stdout = std::fs::OpenOptions::new()
@@ -102,7 +102,7 @@ fn daemonize_and_start(addr: &str, config: crate::config::Config) {
         .stderr(stderr);
 
     match daemon.start() {
-        Ok(_) => start_server(addr, config),
+        Ok(_) => start_server(addr),
         Err(e) => {
             eprintln!("Failed to daemonize: {}", e);
             std::process::exit(1);
