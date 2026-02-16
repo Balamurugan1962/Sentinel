@@ -1,4 +1,4 @@
-client_id = "student-01"
+client_id = "1"
 root_ip = "127.0.0.1"
-root_port = 9000
+root_port = 1612
 heartbeat_interval = 5
