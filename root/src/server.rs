@@ -1,3 +1,4 @@
+use chrono::Local;
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -6,7 +7,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use chrono::Local;
+use crate::get_base_dir;
 
 pub const SOCKET_PATH: &str = "/tmp/sentinel.sock";
 
@@ -20,7 +21,13 @@ pub struct NodeInfo {
 }
 
 fn log_to_file(target: &str, message: &str) {
-    let path = format!("logs/{}.log", target);
+    let base_dir = get_base_dir();
+    let log_dir = base_dir.join("logs");
+
+    // Ensure the logs folder exists
+    std::fs::create_dir_all(&log_dir).ok();
+
+    let path = log_dir.join(format!("{}.log", target));
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
         let ts = Local::now().format("%Y-%m-%d %H:%M:%S");
         let _ = writeln!(file, "[{}] {}", ts, message);
