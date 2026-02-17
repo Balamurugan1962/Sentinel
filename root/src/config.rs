@@ -2,6 +2,7 @@ use serde::Deserialize;
 use std::fmt;
 use std::fs;
 use std::net::IpAddr;
+use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -28,9 +29,10 @@ impl fmt::Display for Config {
     }
 }
 
-pub fn load_config(path: &str) -> Config {
+pub fn load_config(path: &PathBuf) -> Config {
     let content = fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("Failed to read config '{}': {}", path, e));
+        .unwrap_or_else(|e| panic!("Failed to read config '{}': {}", path.display(), e));
 
-    toml::from_str(&content).unwrap_or_else(|e| panic!("Failed to parse config '{}': {}", path, e))
+    toml::from_str(&content)
+        .unwrap_or_else(|e| panic!("Failed to parse config '{}': {}", path.display(), e))
 }

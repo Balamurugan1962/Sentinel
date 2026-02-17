@@ -1,17 +1,26 @@
-use std::env;
 use std::io::{BufRead, BufReader, Write};
-use std::net::{Shutdown, TcpListener};
+use std::net::{Ipv4Addr, Shutdown, TcpListener};
 use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 use daemonize::Daemonize;
 
 use crate::config::load_config;
+use crate::io::prompt_input;
 use crate::server::{SOCKET_PATH, start_server};
 
 mod config;
+mod io;
 mod server;
 
+fn get_base_dir() -> PathBuf {
+    return dirs::home_dir().unwrap().join(".sentinel");
+}
 fn main() {
+    let base_dir = get_base_dir();
+    std::fs::create_dir_all(&base_dir).unwrap();
+
     let args: Vec<String> = env::args().collect();
 
     if args.contains(&"-h".to_string()) || args.contains(&"--help".to_string()) {
@@ -31,8 +40,7 @@ fn main() {
         return;
     }
 
-    // Parse flags that need a config
-    let mut config_path = "config.toml".to_string();
+    let mut config_path = base_dir.join("config.toml");
     let mut no_daemon = false;
     let mut print_config = false;
 
@@ -42,7 +50,7 @@ fn main() {
             "-c" | "--config" => {
                 i += 1;
                 if i < args.len() {
-                    config_path = args[i].clone();
+                    config_path = PathBuf::from(&args[i]);
                 }
             }
             "--no-daemon" => no_daemon = true,
@@ -56,10 +64,54 @@ fn main() {
         i += 1;
     }
 
+    if !Path::new(&config_path).exists() {
+        println!("Config file not found at '{}'", config_path.display());
+        println!("Let's create one.");
+
+        // Ask user for IP and port
+        let ip_str = prompt_input("Enter root IP (e.g., 192.168.1.10): ");
+        let port_str = prompt_input("Enter root port (e.g., 8080): ");
+
+        // Validate IP
+        let ip: Ipv4Addr = match ip_str.parse() {
+            Ok(ip) => ip,
+            Err(_) => {
+                eprintln!("Invalid IP address '{}'", ip_str);
+                std::process::exit(1);
+            }
+        };
+
+        // Validate port
+        let port: u16 = match port_str.parse() {
+            Ok(port) => port,
+            Err(_) => {
+                eprintln!("Invalid port '{}'", port_str);
+                std::process::exit(1);
+            }
+        };
+
+        // Save a minimal config.toml
+        let toml_content = format!("[root]\nip = \"{}\"\nport = {}", ip, port);
+
+        fs::write(&config_path, toml_content).expect("Failed to write config.toml");
+        println!("Config saved to '{}'", config_path.display());
+    }
+
+    if fs::metadata(&config_path).is_err() {
+        eprintln!(
+            "Error: Cannot access config file '{}'",
+            config_path.display()
+        );
+        std::process::exit(1);
+    }
+
     let config = load_config(&config_path);
 
     if print_config {
-        println!("Sentinel — Loaded config from '{}'\n", config_path);
+        println!(
+            "Sentinel — Loaded config from '{}'\n",
+            config_path.display()
+        );
         print!("{}", config);
         return;
     }
@@ -78,26 +130,34 @@ fn main() {
     }
 
     println!("Sentinel server starting on {}...", root_addr);
-    daemonize_and_start(&root_addr);
+    daemonize_and_start(&root_addr, &base_dir);
 }
 
-fn daemonize_and_start(addr: &str) {
-    std::fs::create_dir_all("logs").ok();
+fn daemonize_and_start(addr: &str, base_dir: &Path) {
+    let log_dir = base_dir.join("logs");
+    let sentinel_log = log_dir.join("sentinel.log");
+    let sentinel_err = log_dir.join("errors.log");
+
+    if log_dir.exists() {
+        std::fs::remove_dir_all(&log_dir).ok();
+    }
+
+    std::fs::create_dir_all(&log_dir).expect("Failed to create logs directory");
 
     let stdout = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open("logs/sentinel.log")
+        .open(&sentinel_log)
         .expect("Failed to open logs/sentinel.log");
 
     let stderr = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open("logs/sentinel.log")
+        .open(&sentinel_err)
         .expect("Failed to open logs/sentinel.log");
 
     let daemon = Daemonize::new()
-        .working_directory(".")
+        .working_directory(&base_dir)
         .stdout(stdout)
         .stderr(stderr);
 
