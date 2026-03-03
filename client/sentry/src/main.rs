@@ -9,7 +9,7 @@ use tokio::{
 
 //TODO:
 // should get it from config
-const CLIENT_ID: &str = "3122235001027";
+const CLIENT_ID: &str = "27";
 const VERSION: &str = "SNT0.1";
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
