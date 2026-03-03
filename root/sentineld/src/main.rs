@@ -13,6 +13,9 @@ use tokio::sync::Mutex;
 
 use tokio::sync::mpsc;
 
+// TODO:
+// instead fo string, we need to
+// create a custom protocol type
 type Clients = Arc<Mutex<HashMap<usize, mpsc::Sender<String>>>>;
 static CLIENT_ID: AtomicUsize = AtomicUsize::new(1);
 
@@ -24,6 +27,22 @@ fn main() -> Result<()> {
     let runtime = Builder::new_multi_thread().enable_all().build()?;
 
     runtime.block_on(async_main())
+}
+
+// TODO:
+// for now it logs in /tmp
+// but for prod we need to switch it to /var/log/sentinel
+fn daemonize() -> Result<()> {
+    let stdout = File::create("/tmp/sentinel.out")?;
+    let stderr = File::create("/tmp/sentinel.err")?;
+
+    let daemonize = Daemonize::new()
+        .pid_file("/tmp/sentinel.pid")
+        .stdout(stdout)
+        .stderr(stderr);
+
+    daemonize.start()?;
+    Ok(())
 }
 
 async fn async_main() -> Result<()> {
@@ -45,19 +64,6 @@ async fn async_main() -> Result<()> {
     });
 
     future::pending::<()>().await;
-    Ok(())
-}
-
-fn daemonize() -> Result<()> {
-    let stdout = File::create("/tmp/sentinel.out")?;
-    let stderr = File::create("/tmp/sentinel.err")?;
-
-    let daemonize = Daemonize::new()
-        .pid_file("/tmp/sentinel.pid")
-        .stdout(stdout)
-        .stderr(stderr);
-
-    daemonize.start()?;
     Ok(())
 }
 
