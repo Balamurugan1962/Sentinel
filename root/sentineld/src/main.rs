@@ -71,8 +71,21 @@ async fn run_tcp_server(clients: Clients) -> Result<()> {
     let listener = TcpListener::bind("127.0.0.1:1612").await?;
 
     loop {
-        let (stream, addr) = listener.accept().await?;
-        let id = CLIENT_ID.fetch_add(1, Ordering::SeqCst);
+        let (mut stream, addr) = listener.accept().await?;
+
+        let mut buffer = [0u8; 1024];
+        let n = stream.read(&mut buffer).await?;
+        let message = String::from_utf8_lossy(&buffer[..n]).to_string();
+        println!("New Connection Request:{}", message);
+
+        let parts: Vec<&str> = message.trim().split_whitespace().collect();
+
+        let mut id = CLIENT_ID.fetch_add(1, Ordering::SeqCst);
+
+        if parts.len() == 3 && parts[0] == "HELLO" {
+            id = parts[1].parse::<usize>().unwrap();
+            stream.write_all(b"AKN").await?;
+        }
 
         println!("Client {} connected from {}", id, addr);
 
