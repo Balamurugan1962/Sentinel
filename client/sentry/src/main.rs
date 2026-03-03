@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::time::Duration;
+use std::{net::Ipv4Addr, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -73,20 +73,59 @@ async fn root_server_task(tx: mpsc::Sender<String>) -> Result<()> {
     Ok(())
 }
 
+// TODO:
+// Need to refine this part to support
+// Kafka logging.
 async fn network_logger_task(mut rx: mpsc::Receiver<String>) -> Result<()> {
-    println!("[NETWORK THREAD] Logger started");
+    println!("[NETWORK THREAD] Loading XDP firewall...");
+    //TODO:
+    // Test this part
+    // ip link show dev enp3s0
+    // Before
+    // prog/xdp id 52
+    // After
+    // ip link show dev enp3s0
 
-    // Mock Kafka Producer
-    // In real world use rdkafka FutureProducer
+    // let mut bpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
+    //     env!("OUT_DIR"),
+    //     "/xdp-firewall"
+    // )))?;
+
+    // let program: &mut Xdp = bpf.program_mut("xdp_firewall")?.try_into()?;
+
+    // program.load()?;
+    // program.attach("enp3s0", XdpFlags::default())?;
+
+    println!("[NETWORK THREAD] Firewall attached");
+
+    // Get BLOCKLIST map
+    // let mut blocklist: HashMap<_, u32, u32> = HashMap::try_from(bpf.map_mut("BLOCKLIST")?)?;
+
+    println!("[NETWORK THREAD] Ready for actions...");
 
     while let Some(message) = rx.recv().await {
-        println!("[NETWORK THREAD] {}", message.trim());
+        println!("[NETWORK THREAD] Received: {}", message.trim());
 
-        // Mock sending to Kafka
-        println!("[NETWORK THREAD] Sending mock data to Kafka...");
-        sleep(Duration::from_millis(500)).await;
-        println!("[NETWORK THREAD] Kafka send complete");
+        // Expected format:
+        // ACTION network BLOCK 8.8.8.8
+        if let Some(ip_str) = parse_block_ip(&message) {
+            let ip: u32 = ip_str.parse::<Ipv4Addr>()?.into();
+
+            // blocklist.insert(ip, 0, 0)?;
+
+            println!("[NETWORK THREAD] Blocked IP {}", ip_str);
+        }
     }
 
     Ok(())
+}
+
+fn parse_block_ip(message: &str) -> Option<&str> {
+    let parts: Vec<&str> = message.trim().split_whitespace().collect();
+
+    if parts.len() == 4 && parts[0] == "ACTION" && parts[1] == "network" && parts[2] == "BLOCK" {
+        return Some(parts[3]);
+    }
+
+    None
 }
