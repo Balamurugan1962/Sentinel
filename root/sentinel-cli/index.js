@@ -4,16 +4,52 @@ const net = require("net");
 
 const SOCKET_PATH = "/tmp/sentinel.sock";
 
+function formatTable(data) {
+  if (!data.length) {
+    console.log("No clients connected");
+    return;
+  }
+
+  const header = ["Client", "Name", "Reg"];
+
+  const widths = [10, 20, 20];
+
+  const line = (cols) =>
+    cols.map((c, i) => String(c).padEnd(widths[i])).join(" | ");
+
+  console.log(line(header));
+  console.log("-".repeat(10) + "-+-" + "-".repeat(20) + "-+-" + "-".repeat(20));
+
+  for (const c of data) {
+    console.log(line([c.id, c.name, c.reg]));
+  }
+}
+
 function sendCommand(command) {
   const client = net.createConnection(SOCKET_PATH);
+
+  let buffer = "";
 
   client.on("connect", () => {
     client.write(command);
   });
 
   client.on("data", (data) => {
-    process.stdout.write(data.toString());
-    client.end();
+    buffer += data.toString();
+  });
+
+  client.on("end", () => {
+    try {
+      const json = JSON.parse(buffer);
+
+      if (Array.isArray(json)) {
+        formatTable(json);
+      } else {
+        console.log(json);
+      }
+    } catch {
+      console.log(buffer);
+    }
   });
 
   client.on("error", (err) => {
