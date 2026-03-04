@@ -4,19 +4,24 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use tokio::runtime::Builder;
-use tokio::sync::broadcast;
-
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
-use tokio::sync::Mutex;
-
+use tokio::runtime::Builder;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 
 // TODO:
 // instead fo string, we need to
 // create a custom protocol type
-type Clients = Arc<Mutex<HashMap<usize, mpsc::Sender<String>>>>;
+
+struct ClientMeta {
+    tx: mpsc::Sender<String>,
+    name: String,
+    reg: String,
+}
+
+type Clients = Arc<Mutex<HashMap<usize, ClientMeta>>>;
 static CLIENT_ID: AtomicUsize = AtomicUsize::new(1);
 
 fn main() -> Result<()> {
@@ -103,7 +108,14 @@ async fn run_tcp_server(clients: Clients, mut shutdown: broadcast::Receiver<()>)
                         }
 
                         let (tx, rx) = mpsc::channel::<String>(32);
-                        clients.lock().await.insert(id, tx);
+                        clients.lock().await.insert(
+                            id,
+                            ClientMeta {
+                                tx,
+                                name: "unknown".into(),
+                                reg: "unknown".into(),
+                            },
+                        );
 
                         tokio::spawn(handle_tcp(id, stream, rx, clients.clone()));
             }
@@ -199,9 +211,20 @@ async fn handle_unix(
         }
         "-ls" => {
             let guard = clients.lock().await;
-            let list: Vec<String> = guard.keys().map(|id| id.to_string()).collect();
-            let response = format!("Connected Clients: {:?}\n", list);
-            stream.write_all(response.as_bytes()).await?;
+
+            let list: Vec<_> = guard
+                .iter()
+                .map(|(id, meta)| {
+                    serde_json::json!({
+                        "id": id,
+                        "name": meta.name,
+                        "reg": meta.reg
+                    })
+                })
+                .collect();
+
+            let json = serde_json::to_string(&list)?;
+            stream.write_all(json.as_bytes()).await?;
         }
 
         "-stop" => {
@@ -221,12 +244,12 @@ async fn handle_unix(
 
             let guard = clients.lock().await;
 
-            if let Some(sender) = guard.get(&id) {
-                let _ = sender.send(message).await;
-                stream.write_all(b"Message sent\n").await?;
-            } else {
-                stream.write_all(b"Client not found\n").await?;
-            }
+            // if let Some(sender) = guard.get(&id) {
+            //     let _ = sender.send(message).await;
+            //     stream.write_all(b"Message sent\n").await?;
+            // } else {
+            //     stream.write_all(b"Client not found\n").await?;
+            // }
         }
 
         _ => {
