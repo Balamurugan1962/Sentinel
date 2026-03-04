@@ -1,0 +1,14 @@
+{
+  "name": "sentinel-bridge",
+  "version": "1.0.0",
+  "main": "index.js",
+  "bin": {
+    "bridge": "./index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": ""
+}
