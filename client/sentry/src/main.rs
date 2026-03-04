@@ -1,41 +1,65 @@
 use anyhow::Result;
-use std::{net::Ipv4Addr, time::Duration};
+use daemonize::Daemonize;
+use std::{fs::File, net::Ipv4Addr, path::Path, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
-    sync::mpsc,
+    net::{TcpStream, UnixListener, UnixStream},
+    runtime::Builder,
+    sync::{broadcast, mpsc},
     time::sleep,
 };
 
-//TODO:
-// should get it from config
 const CLIENT_ID: &str = "27";
 const VERSION: &str = "SNT0.1";
+const UNIX_SOCKET: &str = "/tmp/sentry.sock";
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
-async fn main() -> Result<()> {
-    println!("Sentinel Client Starting...");
+fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
 
-    // Channel between server thread and network logger
+    daemonize()?;
+
+    let runtime = Builder::new_multi_thread().enable_all().build()?;
+    runtime.block_on(async_main())
+}
+
+fn daemonize() -> Result<()> {
+    let stdout = File::create("/tmp/sentry.out")?;
+    let stderr = File::create("/tmp/sentry.err")?;
+
+    let daemon = Daemonize::new()
+        .pid_file("/tmp/sentry.pid")
+        .stdout(stdout)
+        .stderr(stderr);
+
+    daemon.start()?;
+    Ok(())
+}
+
+async fn async_main() -> Result<()> {
+    println!("Sentry daemon starting");
+
     let (tx, rx) = mpsc::channel::<String>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
-    // Spawn root server polling thread
-    let server_task = tokio::spawn(root_server_task(tx));
+    let shutdown_root = shutdown_tx.subscribe();
+    let shutdown_unix = shutdown_tx.subscribe();
 
-    // Spawn network logger thread
-    let network_task = tokio::spawn(network_logger_task(rx));
+    tokio::spawn(root_server_task(tx, shutdown_root));
+    tokio::spawn(network_logger_task(rx));
 
-    tokio::try_join!(server_task, network_task)?;
+    run_unix_server(shutdown_tx, shutdown_unix).await?;
 
     Ok(())
 }
 
-async fn root_server_task(tx: mpsc::Sender<String>) -> Result<()> {
-    println!("[SERVER THREAD] Connecting to root server...");
+async fn root_server_task(
+    tx: mpsc::Sender<String>,
+    mut shutdown: broadcast::Receiver<()>,
+) -> Result<()> {
+    println!("[SERVER] Connecting to root server...");
 
     let mut stream = TcpStream::connect("127.0.0.1:1612").await?;
 
-    // ---- Handshake ----
     let hello = format!("HELLO {} {}\n", CLIENT_ID, VERSION);
     stream.write_all(hello.as_bytes()).await?;
 
@@ -48,23 +72,35 @@ async fn root_server_task(tx: mpsc::Sender<String>) -> Result<()> {
         return Ok(());
     }
 
-    println!("[SERVER THREAD] Handshake successful");
+    println!("[SERVER] Handshake success");
 
-    // ---- Polling Loop ----
     loop {
-        let n = stream.read(&mut buffer).await?;
+        tokio::select! {
 
-        if n == 0 {
-            println!("Server disconnected");
-            break;
-        }
+            _ = shutdown.recv() => {
+                println!("Server task shutting down");
+                break;
+            }
 
-        let message = String::from_utf8_lossy(&buffer[..n]).to_string();
+            result = stream.read(&mut buffer) => {
 
-        if message.contains("ACTION self") {
-            println!("[SERVER THREAD] {}", message.trim());
-        } else if message.contains("ACTION network") {
-            tx.send(message.clone()).await?;
+                let n = result?;
+
+                if n == 0 {
+                    println!("Server disconnected");
+                    break;
+                }
+
+                let message = String::from_utf8_lossy(&buffer[..n]).to_string();
+
+                if message.contains("ACTION self") {
+                    println!("{}", message.trim());
+                }
+
+                else if message.contains("ACTION network") {
+                    tx.send(message.clone()).await?;
+                }
+            }
         }
 
         sleep(Duration::from_secs(2)).await;
@@ -73,47 +109,18 @@ async fn root_server_task(tx: mpsc::Sender<String>) -> Result<()> {
     Ok(())
 }
 
-// TODO:
-// Need to refine this part to support
-// Kafka logging.
 async fn network_logger_task(mut rx: mpsc::Receiver<String>) -> Result<()> {
-    println!("[NETWORK THREAD] Loading XDP firewall...");
-    //TODO:
-    // Test this part
-    // ip link show dev enp3s0
-    // Before
-    // prog/xdp id 52
-    // After
-    // ip link show dev enp3s0
-
-    // let mut bpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
-    //     env!("OUT_DIR"),
-    //     "/xdp-firewall"
-    // )))?;
-
-    // let program: &mut Xdp = bpf.program_mut("xdp_firewall")?.try_into()?;
-
-    // program.load()?;
-    // program.attach("enp3s0", XdpFlags::default())?;
-
-    println!("[NETWORK THREAD] Firewall attached");
-
-    // Get BLOCKLIST map
-    // let mut blocklist: HashMap<_, u32, u32> = HashMap::try_from(bpf.map_mut("BLOCKLIST")?)?;
-
-    println!("[NETWORK THREAD] Ready for actions...");
+    println!("[NETWORK] Firewall ready");
 
     while let Some(message) = rx.recv().await {
-        println!("[NETWORK THREAD] Received: {}", message.trim());
+        println!("[NETWORK] {}", message.trim());
 
-        // Expected format:
-        // ACTION network BLOCK 8.8.8.8
         if let Some(ip_str) = parse_block_ip(&message) {
             let ip: u32 = ip_str.parse::<Ipv4Addr>()?.into();
 
-            // blocklist.insert(ip, 0, 0)?;
+            println!("[NETWORK] Blocking {}", ip_str);
 
-            println!("[NETWORK THREAD] Blocked IP {}", ip_str);
+            let _ = ip;
         }
     }
 
@@ -128,4 +135,66 @@ fn parse_block_ip(message: &str) -> Option<&str> {
     }
 
     None
+}
+
+async fn run_unix_server(
+    shutdown_tx: broadcast::Sender<()>,
+    mut shutdown: broadcast::Receiver<()>,
+) -> Result<()> {
+    if Path::new(UNIX_SOCKET).exists() {
+        std::fs::remove_file(UNIX_SOCKET)?;
+    }
+
+    let listener = UnixListener::bind(UNIX_SOCKET)?;
+
+    println!("Unix control socket ready {}", UNIX_SOCKET);
+
+    loop {
+        tokio::select! {
+
+            _ = shutdown.recv() => {
+                println!("Unix server shutting down");
+                break;
+            }
+
+            result = listener.accept() => {
+
+                let (stream, _) = result?;
+
+                let shutdown_clone = shutdown_tx.clone();
+
+                tokio::spawn(async move {
+                    if let Err(e) = handle_unix(stream, shutdown_clone).await {
+                        eprintln!("Unix handler error {:?}", e);
+                    }
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_unix(mut stream: UnixStream, shutdown_tx: broadcast::Sender<()>) -> Result<()> {
+    let mut buffer = [0u8; 1024];
+
+    let n = stream.read(&mut buffer).await?;
+    let cmd = String::from_utf8_lossy(&buffer[..n]).trim().to_string();
+
+    match cmd.as_str() {
+        "-status" => {
+            stream.write_all(b"Sentry running\n").await?;
+        }
+
+        "-stop" => {
+            stream.write_all(b"Stopping sentry\n").await?;
+            let _ = shutdown_tx.send(());
+        }
+
+        _ => {
+            stream.write_all(b"Unknown command\n").await?;
+        }
+    }
+
+    Ok(())
 }
