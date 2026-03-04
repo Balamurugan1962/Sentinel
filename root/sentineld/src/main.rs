@@ -2,7 +2,6 @@ use anyhow::Result;
 use daemonize::Daemonize;
 use std::collections::HashMap;
 use std::fs::File;
-use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::runtime::Builder;
