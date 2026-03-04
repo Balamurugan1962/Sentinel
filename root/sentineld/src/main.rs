@@ -7,13 +7,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 use tokio::runtime::Builder;
-use tokio::sync::broadcast;
-use tokio::sync::mpsc;
-use tokio::sync::Mutex;
-
-// TODO:
-// instead fo string, we need to
-// create a custom protocol type
+use tokio::sync::{broadcast, mpsc, Mutex};
 
 struct ClientMeta {
     tx: mpsc::Sender<String>,
@@ -22,7 +16,7 @@ struct ClientMeta {
 }
 
 type Clients = Arc<Mutex<HashMap<usize, ClientMeta>>>;
-static CLIENT_ID: AtomicUsize = AtomicUsize::new(1);
+static CLIENT_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
@@ -30,13 +24,9 @@ fn main() -> Result<()> {
     daemonize()?;
 
     let runtime = Builder::new_multi_thread().enable_all().build()?;
-
     runtime.block_on(async_main())
 }
 
-// TODO:
-// for now it logs in /tmp
-// but for prod we need to switch it to /var/log/sentinel
 fn daemonize() -> Result<()> {
     let stdout = File::create("/tmp/sentinel.out")?;
     let stderr = File::create("/tmp/sentinel.err")?;
@@ -52,7 +42,6 @@ fn daemonize() -> Result<()> {
 
 async fn async_main() -> Result<()> {
     let clients: Clients = Arc::new(Mutex::new(HashMap::new()));
-
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
     let tcp_clients = clients.clone();
@@ -75,9 +64,7 @@ async fn async_main() -> Result<()> {
         }
     });
 
-    // Wait until shutdown signal is received
     shutdown_tx.subscribe().recv().await.ok();
-
     println!("Sentinel shutting down...");
     Ok(())
 }
@@ -87,40 +74,47 @@ async fn run_tcp_server(clients: Clients, mut shutdown: broadcast::Receiver<()>)
 
     loop {
         tokio::select! {
+
             _ = shutdown.recv() => {
-                        println!("TCP server shutting down...");
-                        break Ok(());
+                println!("TCP server shutting down...");
+                break;
             }
 
             result = listener.accept() => {
-                        let (mut stream, addr) = result?;
+                let (mut stream, _) = result?;
 
-                        let mut buffer = [0u8; 1024];
-                        let n = stream.read(&mut buffer).await?;
-                        let message = String::from_utf8_lossy(&buffer[..n]).to_string();
+                let mut buffer = [0u8;1024];
+                let n = stream.read(&mut buffer).await?;
+                let msg = String::from_utf8_lossy(&buffer[..n]).to_string();
 
-                        let parts: Vec<&str> = message.trim().split_whitespace().collect();
-                        let mut id = CLIENT_ID.fetch_add(1, Ordering::SeqCst);
+                let parts:Vec<&str> = msg.trim().split_whitespace().collect();
 
-                        if parts.len() == 3 && parts[0] == "HELLO" {
-                            id = parts[1].parse::<usize>().unwrap();
-                            stream.write_all(b"AKN").await?;
-                        }
+                let mut id = CLIENT_COUNTER.fetch_add(1, Ordering::SeqCst);
 
-                        let (tx, rx) = mpsc::channel::<String>(32);
-                        clients.lock().await.insert(
-                            id,
-                            ClientMeta {
-                                tx,
-                                name: "unknown".into(),
-                                reg: "unknown".into(),
-                            },
-                        );
+                if parts.len() == 3 && parts[0] == "HELLO" {
+                    id = parts[1].parse().unwrap_or(id);
+                    stream.write_all(b"AKN").await?;
+                }
 
-                        tokio::spawn(handle_tcp(id, stream, rx, clients.clone()));
+                let (tx,rx) = mpsc::channel::<String>(32);
+
+                clients.lock().await.insert(
+                    id,
+                    ClientMeta{
+                        tx,
+                        name:"unknown".into(),
+                        reg:"unknown".into()
+                    }
+                );
+
+                println!("Client {} connected",id);
+
+                tokio::spawn(handle_tcp(id,stream,rx,clients.clone()));
             }
         }
     }
+
+    Ok(())
 }
 
 async fn handle_tcp(
@@ -134,26 +128,50 @@ async fn handle_tcp(
     loop {
         tokio::select! {
 
-            // Incoming data from TCP client
             result = stream.read(&mut buffer) => {
+
                 match result {
-                    Ok(0) => {
-                        println!("Client {} disconnected", id);
+
+                    Ok(0)=>{
+                        println!("Client {} disconnected",id);
                         clients.lock().await.remove(&id);
                         return;
                     }
-                    Ok(n) => {
-                        println!("From {}: {}", id, String::from_utf8_lossy(&buffer[..n]));
+
+                    Ok(n)=>{
+
+                        let message = String::from_utf8_lossy(&buffer[..n]).to_string();
+
+                        println!("From {}: {}",id,message.trim());
+
+                        if message.starts_with("INFO"){
+
+                            if let Some(json_start)=message.find('{'){
+
+                                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&message[json_start..]){
+
+                                    let name=v["name"].as_str().unwrap_or("unknown").to_string();
+                                    let reg=v["regno"].as_str().unwrap_or("unknown").to_string();
+
+                                    let mut guard = clients.lock().await;
+
+                                    if let Some(meta)=guard.get_mut(&id){
+                                        meta.name=name;
+                                        meta.reg=reg;
+                                    }
+                                }
+                            }
+                        }
                     }
-                    Err(_) => {
+
+                    Err(_)=>{
                         clients.lock().await.remove(&id);
                         return;
                     }
                 }
             }
 
-            // Message from Unix control plane
-            Some(msg) = rx.recv() => {
+            Some(msg)=rx.recv()=>{
                 let _ = stream.write_all(msg.as_bytes()).await;
             }
         }
@@ -175,24 +193,31 @@ async fn run_unix_server(
 
     loop {
         tokio::select! {
-            _ = shutdown.recv() => {
+
+            _ = shutdown.recv()=>{
                 println!("Unix server shutting down...");
-                break Ok(());
+                break;
             }
 
-            result = listener.accept() => {
-                let (stream, _) = result?;
-                let clients_clone = clients.clone();
-                let shutdown_clone = shutdown_tx.clone();
+            result = listener.accept()=>{
 
-                tokio::spawn(async move {
-                    if let Err(e) = handle_unix(stream, clients_clone, shutdown_clone).await {
-                        eprintln!("Unix handler error: {:?}", e);
+                let (stream,_) = result?;
+
+                let clients_clone=clients.clone();
+                let shutdown_clone=shutdown_tx.clone();
+
+                tokio::spawn(async move{
+
+                    if let Err(e)=handle_unix(stream,clients_clone,shutdown_clone).await{
+                        eprintln!("Unix handler error {:?}",e);
                     }
+
                 });
             }
         }
     }
+
+    Ok(())
 }
 
 async fn handle_unix(
@@ -206,9 +231,9 @@ async fn handle_unix(
 
     match cmd.as_str() {
         "-status" => {
-            let response = format!("Status: Active\n");
-            stream.write_all(response.as_bytes()).await?;
+            stream.write_all(b"Status: Active\n").await?;
         }
+
         "-ls" => {
             let guard = clients.lock().await;
 
@@ -216,9 +241,9 @@ async fn handle_unix(
                 .iter()
                 .map(|(id, meta)| {
                     serde_json::json!({
-                        "id": id,
-                        "name": meta.name,
-                        "reg": meta.reg
+                        "id":id,
+                        "name":meta.name,
+                        "reg":meta.reg
                     })
                 })
                 .collect();
@@ -228,12 +253,13 @@ async fn handle_unix(
         }
 
         "-stop" => {
-            stream.write_all(b"Stopping Sentinel...\n").await?;
+            stream.write_all(b"Stopping Sentinel\n").await?;
             let _ = shutdown_tx.send(());
         }
 
         _ if cmd.starts_with("-send") => {
             let parts: Vec<&str> = cmd.splitn(3, ' ').collect();
+
             if parts.len() < 3 {
                 stream.write_all(b"Usage: -send <id> <message>\n").await?;
                 return Ok(());
@@ -244,12 +270,13 @@ async fn handle_unix(
 
             let guard = clients.lock().await;
 
-            // if let Some(sender) = guard.get(&id) {
-            //     let _ = sender.send(message).await;
-            //     stream.write_all(b"Message sent\n").await?;
-            // } else {
-            //     stream.write_all(b"Client not found\n").await?;
-            // }
+            if let Some(client) = guard.get(&id) {
+                let _ = client.tx.send(format!("{}\n", message)).await;
+
+                stream.write_all(b"Message sent\n").await?;
+            } else {
+                stream.write_all(b"Client not found\n").await?;
+            }
         }
 
         _ => {
