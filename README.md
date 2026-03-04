@@ -1,48 +1,64 @@
-# Sentinel
+# Centralized Monitoring System
 
-Sentinel is a powerful and flexible framework for monitoring and controlling distributed systems. It provides a secure lab monitoring daemon.
+CMS is a powerful and flexible tool for monitoring and controlling distributed systems. It provides a secure lab monitoring daemon.
 
-## Plan:
+# Sentinel:
 
-So for the initial plan would be start with a proof-of-concept for our architecture in python, then slowly port to rust.
+Root server is known as Sentinel, and it creates multiple pooled threads, and creates a duplex based TCP connection
 
-## Installation:
+## Sentinel is part of:
 
-### Step 1:
+### Sentineld:
 
-#### Install the sentinel in root computer.
+Core daemon running in the background.
 
+### Sentinel-cli:
+
+Nodejs based cli, that connects sentineld with Unix Sockets.
+
+# Sentry:
+
+Client is know as sentry, and it connects to sentinel via TCP, has polling and duplex based communication, with that it also exposed Unix socket for internel communication.
+
+## Sentry is part of:
+
+### Sentryd (for now it is sentry):
+
+Core daemon running in the background.
+
+### Sentry-cli:
+
+Nodejs based cli, that connects sentry with Unix Sockets.
+
+
+
+# Installation:
+for devs
+
+clone the repo:
 ```bash
-git clone https://github.com/Balamurugan1962/Sentinel.git
+git clone https://github.com/Balamurugan1962/Sentinel
 ```
 
-### Step 2:
-
-#### Install the dependancy.
-
+# for root system:
 ```bash
-cd poc-python
-pip install -r requirements.txt
+cd Sentinel/root/sentineld
+cargo run
+```
+to check the status:
+```bash
+cd Sentinel/root/sentinel-cli
+node index.js -status
 ```
 
-### Step 4:
-
-#### Configure the system.
-
-In the root project open `config.toml` and the ip for both root and node computers.
-
-### Step 3:
-
-#### Run the main.py with root access.
+## For client system:
 
 ```bash
-python run main.py
+cd Sentinel/client/sentry
+cargo run
 ```
-
-main.py will do the initial set-up by
-
-- going through the config file
-- setting up clients in node computers
-- checking if everything works properly
-
-after that our agent will start runing, capturing the events from node computers
+to check the status:
+```bash
+cd Sentinel/client/sentry-cli
+node index.js -status
+```

@@ -1,5 +1,14 @@
 Change Logs
 
+## Release v0.2.0
+
+### Full - Working Version
+
+Removed whole poc codes, created
+clean production ready code, created
+duplex communication with root server
+and client
+
 ## Release v0.0.3
 
 ### Better-On-Boarding:
