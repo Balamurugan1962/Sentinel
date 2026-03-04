@@ -4,28 +4,45 @@ const net = require("net");
 
 const SOCKET_PATH = "/tmp/sentry.sock";
 
-const command = process.argv[2];
+const args = process.argv.slice(2);
 
-if (!command) {
+if (args.length === 0) {
   console.log(`
 Sentinel CLI
 
 Usage:
   sentry-cli status
   sentry-cli stop
+  sentry-cli info --name <name>
+  sentry-cli info --reg <reg>
 `);
   process.exit(1);
 }
 
 let cmd;
 
-switch (command) {
+switch (args[0]) {
   case "status":
     cmd = "-status";
     break;
 
   case "stop":
     cmd = "-stop";
+    break;
+
+  case "info":
+    if (args[1] === "--name" && args[2]) {
+      cmd = `info --name ${args[2]}`;
+    } else if (args[1] === "--reg" && args[2]) {
+      cmd = `info --reg ${args[2]}`;
+    } else {
+      console.log(`
+Usage:
+  sentry-cli info --name <name>
+  sentry-cli info --reg <reg>
+`);
+      process.exit(1);
+    }
     break;
 
   default:

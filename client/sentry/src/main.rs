@@ -1,17 +1,27 @@
 use anyhow::Result;
 use daemonize::Daemonize;
-use std::{fs::File, net::Ipv4Addr, path::Path, time::Duration};
+use std::{fs::File, net::Ipv4Addr, path::Path, sync::Arc, time::Duration};
+
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, UnixListener, UnixStream},
     runtime::Builder,
-    sync::{broadcast, mpsc},
+    sync::{broadcast, mpsc, Mutex},
     time::sleep,
 };
 
 const CLIENT_ID: &str = "27";
 const VERSION: &str = "SNT0.1";
+const ROOT_SERVER: &str = "127.0.0.1:1612";
 const UNIX_SOCKET: &str = "/tmp/sentry.sock";
+
+#[derive(Default)]
+struct UserInfo {
+    name: String,
+    reg: String,
+}
+
+type SharedUser = Arc<Mutex<UserInfo>>;
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
@@ -38,32 +48,48 @@ fn daemonize() -> Result<()> {
 async fn async_main() -> Result<()> {
     println!("Sentry daemon starting");
 
-    let (tx, rx) = mpsc::channel::<String>(100);
+    let user: SharedUser = Arc::new(Mutex::new(UserInfo {
+        name: "unknown".into(),
+        reg: "unknown".into(),
+    }));
+
+    let (network_tx, network_rx) = mpsc::channel::<String>(100);
+    let (server_tx, server_rx) = mpsc::channel::<String>(100);
+
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
     let shutdown_root = shutdown_tx.subscribe();
     let shutdown_unix = shutdown_tx.subscribe();
 
-    tokio::spawn(root_server_task(tx, shutdown_root));
-    tokio::spawn(network_logger_task(rx));
+    tokio::spawn(root_server_task(
+        network_tx,
+        server_rx,
+        user.clone(),
+        shutdown_root,
+    ));
 
-    run_unix_server(shutdown_tx, shutdown_unix).await?;
+    tokio::spawn(network_logger_task(network_rx));
+
+    run_unix_server(shutdown_tx, shutdown_unix, user.clone(), server_tx).await?;
 
     Ok(())
 }
 
 async fn root_server_task(
-    tx: mpsc::Sender<String>,
+    network_tx: mpsc::Sender<String>,
+    mut server_rx: mpsc::Receiver<String>,
+    user: SharedUser,
     mut shutdown: broadcast::Receiver<()>,
 ) -> Result<()> {
     println!("[SERVER] Connecting to root server...");
 
-    let mut stream = TcpStream::connect("127.0.0.1:1612").await?;
+    let mut stream = TcpStream::connect(ROOT_SERVER).await?;
 
     let hello = format!("HELLO {} {}\n", CLIENT_ID, VERSION);
     stream.write_all(hello.as_bytes()).await?;
 
     let mut buffer = [0u8; 1024];
+
     let n = stream.read(&mut buffer).await?;
     let response = String::from_utf8_lossy(&buffer[..n]);
 
@@ -73,6 +99,17 @@ async fn root_server_task(
     }
 
     println!("[SERVER] Handshake success");
+
+    let u = user.lock().await;
+
+    let info = format!(
+        "INFO user {}\n{{\"name\":\"{}\",\"regno\":\"{}\"}}\n",
+        VERSION, u.name, u.reg
+    );
+
+    stream.write_all(info.as_bytes()).await?;
+
+    drop(u);
 
     loop {
         tokio::select! {
@@ -93,13 +130,19 @@ async fn root_server_task(
 
                 let message = String::from_utf8_lossy(&buffer[..n]).to_string();
 
+                println!("[SERVER] {}", message.trim());
+
                 if message.contains("ACTION self") {
-                    println!("{}", message.trim());
+                    println!("[SELF ACTION] {}", message.trim());
                 }
 
                 else if message.contains("ACTION network") {
-                    tx.send(message.clone()).await?;
+                    network_tx.send(message.clone()).await?;
                 }
+            }
+
+            Some(msg) = server_rx.recv() => {
+                stream.write_all(msg.as_bytes()).await?;
             }
         }
 
@@ -140,6 +183,8 @@ fn parse_block_ip(message: &str) -> Option<&str> {
 async fn run_unix_server(
     shutdown_tx: broadcast::Sender<()>,
     mut shutdown: broadcast::Receiver<()>,
+    user: SharedUser,
+    server_tx: mpsc::Sender<String>,
 ) -> Result<()> {
     if Path::new(UNIX_SOCKET).exists() {
         std::fs::remove_file(UNIX_SOCKET)?;
@@ -162,11 +207,21 @@ async fn run_unix_server(
                 let (stream, _) = result?;
 
                 let shutdown_clone = shutdown_tx.clone();
+                let user_clone = user.clone();
+                let server_tx_clone = server_tx.clone();
 
                 tokio::spawn(async move {
-                    if let Err(e) = handle_unix(stream, shutdown_clone).await {
+
+                    if let Err(e) = handle_unix(
+                        stream,
+                        shutdown_clone,
+                        user_clone,
+                        server_tx_clone
+                    ).await {
+
                         eprintln!("Unix handler error {:?}", e);
                     }
+
                 });
             }
         }
@@ -175,25 +230,56 @@ async fn run_unix_server(
     Ok(())
 }
 
-async fn handle_unix(mut stream: UnixStream, shutdown_tx: broadcast::Sender<()>) -> Result<()> {
+async fn handle_unix(
+    mut stream: UnixStream,
+    shutdown_tx: broadcast::Sender<()>,
+    user: SharedUser,
+    server_tx: mpsc::Sender<String>,
+) -> Result<()> {
     let mut buffer = [0u8; 1024];
 
     let n = stream.read(&mut buffer).await?;
+
     let cmd = String::from_utf8_lossy(&buffer[..n]).trim().to_string();
 
-    match cmd.as_str() {
-        "-status" => {
-            stream.write_all(b"Sentry running\n").await?;
-        }
+    if cmd.starts_with("info --name") {
+        let name = cmd.replace("info --name ", "");
 
-        "-stop" => {
-            stream.write_all(b"Stopping sentry\n").await?;
-            let _ = shutdown_tx.send(());
-        }
+        user.lock().await.name = name;
 
-        _ => {
-            stream.write_all(b"Unknown command\n").await?;
-        }
+        let u = user.lock().await;
+
+        let info = format!(
+            "INFO user {}\n{{\"name\":\"{}\",\"regno\":\"{}\"}}\n",
+            VERSION, u.name, u.reg
+        );
+
+        server_tx.send(info).await?;
+
+        stream.write_all(b"Name updated\n").await?;
+    } else if cmd.starts_with("info --reg") {
+        let reg = cmd.replace("info --reg ", "");
+
+        user.lock().await.reg = reg;
+
+        let u = user.lock().await;
+
+        let info = format!(
+            "INFO user {}\n{{\"name\":\"{}\",\"regno\":\"{}\"}}\n",
+            VERSION, u.name, u.reg
+        );
+
+        server_tx.send(info).await?;
+
+        stream.write_all(b"Reg updated\n").await?;
+    } else if cmd == "-status" {
+        stream.write_all(b"Sentry running\n").await?;
+    } else if cmd == "-stop" {
+        stream.write_all(b"Stopping sentry\n").await?;
+
+        let _ = shutdown_tx.send(());
+    } else {
+        stream.write_all(b"Unknown command\n").await?;
     }
 
     Ok(())
