@@ -31,7 +31,11 @@ switch (args[0]) {
     break;
 
   case "info":
-    if (args[1] === "--name" && args[2]) {
+    if (args[1] === "--name" && args[2] && args[3] === "--reg") {
+      cmd = `info --name ${args[2]} --reg ${args[4]}`;
+    } else if (args[1] === "--reg" && args[2] && args[3] === "--name") {
+      cmd = `info --reg ${args[2]} --name ${args[4]}`;
+    } else if (args[1] === "--name" && args[2]) {
       cmd = `info --name ${args[2]}`;
     } else if (args[1] === "--reg" && args[2]) {
       cmd = `info --reg ${args[2]}`;
