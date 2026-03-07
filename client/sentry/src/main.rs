@@ -239,44 +239,55 @@ async fn handle_unix(
     let mut buffer = [0u8; 1024];
 
     let n = stream.read(&mut buffer).await?;
-
     let cmd = String::from_utf8_lossy(&buffer[..n]).trim().to_string();
 
-    if cmd.starts_with("info --name") {
-        let name = cmd.replace("info --name ", "");
+    if cmd.starts_with("info") {
+        let mut name: Option<String> = Some("unknown".to_string());
+        let mut reg: Option<String> = Some("unknown".to_string());
 
-        user.lock().await.name = name;
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
 
-        let u = user.lock().await;
+        let mut i = 1;
+        while i < parts.len() {
+            match parts[i] {
+                "--name" if i + 1 < parts.len() => {
+                    name = Some(parts[i + 1].to_string());
+                    i += 2;
+                }
+                "--reg" if i + 1 < parts.len() => {
+                    reg = Some(parts[i + 1].to_string());
+                    i += 2;
+                }
+                _ => {
+                    i += 1;
+                }
+            }
+        }
 
-        let info = format!(
-            "INFO user {}\n{{\"name\":\"{}\",\"regno\":\"{}\"}}\n",
-            VERSION, u.name, u.reg
-        );
+        {
+            let mut u = user.lock().await;
 
-        server_tx.send(info).await?;
+            if let Some(n) = name {
+                u.name = n;
+            }
 
-        stream.write_all(b"Name updated\n").await?;
-    } else if cmd.starts_with("info --reg") {
-        let reg = cmd.replace("info --reg ", "");
+            if let Some(r) = reg {
+                u.reg = r;
+            }
 
-        user.lock().await.reg = reg;
+            let info = format!(
+                "INFO user {}\n{{\"name\":\"{}\",\"regno\":\"{}\"}}\n",
+                VERSION, u.name, u.reg
+            );
 
-        let u = user.lock().await;
+            server_tx.send(info).await?;
+        }
 
-        let info = format!(
-            "INFO user {}\n{{\"name\":\"{}\",\"regno\":\"{}\"}}\n",
-            VERSION, u.name, u.reg
-        );
-
-        server_tx.send(info).await?;
-
-        stream.write_all(b"Reg updated\n").await?;
+        stream.write_all(b"Info updated\n").await?;
     } else if cmd == "-status" {
         stream.write_all(b"Sentry running\n").await?;
     } else if cmd == "-stop" {
         stream.write_all(b"Stopping sentry\n").await?;
-
         let _ = shutdown_tx.send(());
     } else {
         stream.write_all(b"Unknown command\n").await?;
