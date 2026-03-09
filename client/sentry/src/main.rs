@@ -1,43 +1,51 @@
 use anyhow::Result;
 use daemonize::Daemonize;
-use std::{fs::File, net::Ipv4Addr, path::Path, sync::Arc, time::Duration};
-
+use std::{fs::File, net::Ipv4Addr, sync::Arc};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpStream, UnixListener, UnixStream},
     runtime::Builder,
     sync::{broadcast, mpsc, Mutex},
-    time::sleep,
 };
 
-const CLIENT_ID: &str = "27";
-const VERSION: &str = "SNT0.1";
-const ROOT_SERVER: &str = "127.0.0.1:1612";
-const UNIX_SOCKET: &str = "/tmp/sentry.sock";
+use crate::{
+    config::{Config, SharedConfig},
+    tcp::root_server_task,
+    unix::run_unix_server,
+    user::{SharedUser, UserInfo},
+};
 
-#[derive(Default)]
-struct UserInfo {
-    name: String,
-    reg: String,
-}
-
-type SharedUser = Arc<Mutex<UserInfo>>;
+mod config;
+mod tcp;
+mod unix;
+mod user;
 
 fn main() -> Result<()> {
+    let config = Config::new();
+    let verbose = config.verbose;
+
+    if verbose {
+        println!("[SENTRY] Start state started!");
+    }
+
     tracing_subscriber::fmt::init();
 
-    daemonize()?;
+    daemonize(&config)?;
+
+    if verbose {
+        println!("[SENTRY] Daemon Started!");
+    }
+
+    let config: SharedConfig = Arc::new(Mutex::new(config));
 
     let runtime = Builder::new_multi_thread().enable_all().build()?;
-    runtime.block_on(async_main())
+    runtime.block_on(async_main(config.clone()))
 }
 
-fn daemonize() -> Result<()> {
-    let stdout = File::create("/tmp/sentry.out")?;
-    let stderr = File::create("/tmp/sentry.err")?;
+fn daemonize(config: &Config) -> Result<()> {
+    let stdout = File::create(&config.stdout)?;
+    let stderr = File::create(&config.stderr)?;
 
     let daemon = Daemonize::new()
-        .pid_file("/tmp/sentry.pid")
+        .pid_file(&config.pid)
         .stdout(stdout)
         .stderr(stderr);
 
@@ -45,13 +53,14 @@ fn daemonize() -> Result<()> {
     Ok(())
 }
 
-async fn async_main() -> Result<()> {
-    println!("Sentry daemon starting");
+async fn async_main(config: SharedConfig) -> Result<()> {
+    let verbose = config.lock().await.verbose.clone();
 
-    let user: SharedUser = Arc::new(Mutex::new(UserInfo {
-        name: "unknown".into(),
-        reg: "unknown".into(),
-    }));
+    if verbose {
+        println!("[SENTRY] Sentry daemon starting");
+    }
+
+    let user: SharedUser = Arc::new(Mutex::new(UserInfo::new()));
 
     let (network_tx, network_rx) = mpsc::channel::<String>(100);
     let (server_tx, server_rx) = mpsc::channel::<String>(100);
@@ -65,89 +74,20 @@ async fn async_main() -> Result<()> {
         network_tx,
         server_rx,
         user.clone(),
+        config.clone(),
         shutdown_root,
     ));
 
     tokio::spawn(network_logger_task(network_rx));
 
-    run_unix_server(shutdown_tx, shutdown_unix, user.clone(), server_tx).await?;
-
-    Ok(())
-}
-
-async fn root_server_task(
-    network_tx: mpsc::Sender<String>,
-    mut server_rx: mpsc::Receiver<String>,
-    user: SharedUser,
-    mut shutdown: broadcast::Receiver<()>,
-) -> Result<()> {
-    println!("[SERVER] Connecting to root server...");
-
-    let mut stream = TcpStream::connect(ROOT_SERVER).await?;
-
-    let hello = format!("HELLO {} {}\n", CLIENT_ID, VERSION);
-    stream.write_all(hello.as_bytes()).await?;
-
-    let mut buffer = [0u8; 1024];
-
-    let n = stream.read(&mut buffer).await?;
-    let response = String::from_utf8_lossy(&buffer[..n]);
-
-    if response.trim() != "AKN" {
-        println!("Handshake failed");
-        return Ok(());
-    }
-
-    println!("[SERVER] Handshake success");
-
-    let u = user.lock().await;
-
-    let info = format!(
-        "INFO user {}\n{{\"name\":\"{}\",\"regno\":\"{}\"}}\n",
-        VERSION, u.name, u.reg
-    );
-
-    stream.write_all(info.as_bytes()).await?;
-
-    drop(u);
-
-    loop {
-        tokio::select! {
-
-            _ = shutdown.recv() => {
-                println!("Server task shutting down");
-                break;
-            }
-
-            result = stream.read(&mut buffer) => {
-
-                let n = result?;
-
-                if n == 0 {
-                    println!("Server disconnected");
-                    break;
-                }
-
-                let message = String::from_utf8_lossy(&buffer[..n]).to_string();
-
-                println!("[SERVER] {}", message.trim());
-
-                if message.contains("ACTION self") {
-                    println!("[SELF ACTION] {}", message.trim());
-                }
-
-                else if message.contains("ACTION network") {
-                    network_tx.send(message.clone()).await?;
-                }
-            }
-
-            Some(msg) = server_rx.recv() => {
-                stream.write_all(msg.as_bytes()).await?;
-            }
-        }
-
-        sleep(Duration::from_secs(2)).await;
-    }
+    run_unix_server(
+        shutdown_tx,
+        shutdown_unix,
+        user.clone(),
+        config.clone(),
+        server_tx,
+    )
+    .await?;
 
     Ok(())
 }
@@ -178,109 +118,4 @@ fn parse_block_ip(message: &str) -> Option<&str> {
     }
 
     None
-}
-
-async fn run_unix_server(
-    shutdown_tx: broadcast::Sender<()>,
-    mut shutdown: broadcast::Receiver<()>,
-    user: SharedUser,
-    server_tx: mpsc::Sender<String>,
-) -> Result<()> {
-    if Path::new(UNIX_SOCKET).exists() {
-        std::fs::remove_file(UNIX_SOCKET)?;
-    }
-
-    let listener = UnixListener::bind(UNIX_SOCKET)?;
-
-    println!("Unix control socket ready {}", UNIX_SOCKET);
-
-    loop {
-        tokio::select! {
-
-            _ = shutdown.recv() => {
-                println!("Unix server shutting down");
-                break;
-            }
-
-            result = listener.accept() => {
-
-                let (stream, _) = result?;
-
-                let shutdown_clone = shutdown_tx.clone();
-                let user_clone = user.clone();
-                let server_tx_clone = server_tx.clone();
-
-                tokio::spawn(async move {
-
-                    if let Err(e) = handle_unix(
-                        stream,
-                        shutdown_clone,
-                        user_clone,
-                        server_tx_clone
-                    ).await {
-
-                        eprintln!("Unix handler error {:?}", e);
-                    }
-
-                });
-            }
-        }
-    }
-
-    Ok(())
-}
-
-async fn handle_unix(
-    mut stream: UnixStream,
-    shutdown_tx: broadcast::Sender<()>,
-    user: SharedUser,
-    server_tx: mpsc::Sender<String>,
-) -> Result<()> {
-    let mut buffer = [0u8; 1024];
-
-    let n = stream.read(&mut buffer).await?;
-
-    let cmd = String::from_utf8_lossy(&buffer[..n]).trim().to_string();
-
-    if cmd.starts_with("info --name") {
-        let name = cmd.replace("info --name ", "");
-
-        user.lock().await.name = name;
-
-        let u = user.lock().await;
-
-        let info = format!(
-            "INFO user {}\n{{\"name\":\"{}\",\"regno\":\"{}\"}}\n",
-            VERSION, u.name, u.reg
-        );
-
-        server_tx.send(info).await?;
-
-        stream.write_all(b"Name updated\n").await?;
-    } else if cmd.starts_with("info --reg") {
-        let reg = cmd.replace("info --reg ", "");
-
-        user.lock().await.reg = reg;
-
-        let u = user.lock().await;
-
-        let info = format!(
-            "INFO user {}\n{{\"name\":\"{}\",\"regno\":\"{}\"}}\n",
-            VERSION, u.name, u.reg
-        );
-
-        server_tx.send(info).await?;
-
-        stream.write_all(b"Reg updated\n").await?;
-    } else if cmd == "-status" {
-        stream.write_all(b"Sentry running\n").await?;
-    } else if cmd == "-stop" {
-        stream.write_all(b"Stopping sentry\n").await?;
-
-        let _ = shutdown_tx.send(());
-    } else {
-        stream.write_all(b"Unknown command\n").await?;
-    }
-
-    Ok(())
 }

@@ -2,6 +2,7 @@
 
 CMS is a powerful and flexible tool for monitoring and controlling distributed systems. It provides a secure lab monitoring daemon.
 
+Note: This project is still in development. **Its not secure to use in production.**
 # Sentinel:
 
 Root server is known as Sentinel, and it creates multiple pooled threads, and creates a duplex based TCP connection

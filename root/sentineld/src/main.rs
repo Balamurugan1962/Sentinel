@@ -142,22 +142,25 @@ async fn handle_tcp(
 
                         let message = String::from_utf8_lossy(&buffer[..n]).to_string();
 
-                        println!("From {}: {}",id,message.trim());
+                        println!("From {}: {}", id, message.trim());
 
-                        if message.starts_with("INFO"){
+                        if message.starts_with("INFO") {
 
-                            if let Some(json_start)=message.find('{'){
+                            if let Some(json_start) = message.find('{') {
 
-                                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&message[json_start..]){
-
-                                    let name=v["name"].as_str().unwrap_or("unknown").to_string();
-                                    let reg=v["regno"].as_str().unwrap_or("unknown").to_string();
+                                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&message[json_start..]) {
 
                                     let mut guard = clients.lock().await;
 
-                                    if let Some(meta)=guard.get_mut(&id){
-                                        meta.name=name;
-                                        meta.reg=reg;
+                                    if let Some(meta) = guard.get_mut(&id) {
+
+                                        if let Some(name) = v["name"].as_str() {
+                                            meta.name = name.to_string();
+                                        }
+
+                                        if let Some(reg) = v["regno"].as_str() {
+                                            meta.reg = reg.to_string();
+                                        }
                                     }
                                 }
                             }
