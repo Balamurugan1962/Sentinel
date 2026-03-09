@@ -1,7 +1,6 @@
 use anyhow::Result;
 use daemonize::Daemonize;
 use std::{fs::File, net::Ipv4Addr, path::Path, sync::Arc, time::Duration};
-
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, UnixListener, UnixStream},
@@ -10,10 +9,9 @@ use tokio::{
     time::sleep,
 };
 
-const CLIENT_ID: &str = "27";
-const VERSION: &str = "SNT0.1";
-const ROOT_SERVER: &str = "127.0.0.1:1612";
-const UNIX_SOCKET: &str = "/tmp/sentry.sock";
+use crate::config::{Config, SharedConfig};
+
+mod config;
 
 #[derive(Default)]
 struct UserInfo {
@@ -24,20 +22,33 @@ struct UserInfo {
 type SharedUser = Arc<Mutex<UserInfo>>;
 
 fn main() -> Result<()> {
+    let config = Config::new();
+    let verbose = config.verbose;
+
+    if verbose {
+        println!("[SENTRY] Start state started!");
+    }
+
     tracing_subscriber::fmt::init();
 
-    daemonize()?;
+    daemonize(&config)?;
+
+    if verbose {
+        println!("[SENTRY] Daemon Started!");
+    }
+
+    let config: SharedConfig = Arc::new(Mutex::new(config));
 
     let runtime = Builder::new_multi_thread().enable_all().build()?;
-    runtime.block_on(async_main())
+    runtime.block_on(async_main(config.clone()))
 }
 
-fn daemonize() -> Result<()> {
-    let stdout = File::create("/tmp/sentry.out")?;
-    let stderr = File::create("/tmp/sentry.err")?;
+fn daemonize(config: &Config) -> Result<()> {
+    let stdout = File::create(&config.stdout)?;
+    let stderr = File::create(&config.stderr)?;
 
     let daemon = Daemonize::new()
-        .pid_file("/tmp/sentry.pid")
+        .pid_file(&config.pid)
         .stdout(stdout)
         .stderr(stderr);
 
@@ -45,8 +56,12 @@ fn daemonize() -> Result<()> {
     Ok(())
 }
 
-async fn async_main() -> Result<()> {
-    println!("Sentry daemon starting");
+async fn async_main(config: SharedConfig) -> Result<()> {
+    let verbose = config.lock().await.verbose.clone();
+
+    if verbose {
+        println!("[SENTRY] Sentry daemon starting");
+    }
 
     let user: SharedUser = Arc::new(Mutex::new(UserInfo {
         name: "unknown".into(),
@@ -65,12 +80,20 @@ async fn async_main() -> Result<()> {
         network_tx,
         server_rx,
         user.clone(),
+        config.clone(),
         shutdown_root,
     ));
 
     tokio::spawn(network_logger_task(network_rx));
 
-    run_unix_server(shutdown_tx, shutdown_unix, user.clone(), server_tx).await?;
+    run_unix_server(
+        shutdown_tx,
+        shutdown_unix,
+        user.clone(),
+        config.clone(),
+        server_tx,
+    )
+    .await?;
 
     Ok(())
 }
@@ -79,13 +102,25 @@ async fn root_server_task(
     network_tx: mpsc::Sender<String>,
     mut server_rx: mpsc::Receiver<String>,
     user: SharedUser,
+    config: SharedConfig,
     mut shutdown: broadcast::Receiver<()>,
 ) -> Result<()> {
     println!("[SERVER] Connecting to root server...");
 
-    let mut stream = TcpStream::connect(ROOT_SERVER).await?;
+    let (ip, port, client_id, version) = {
+        let cfg = config.lock().await;
+        (
+            cfg.server_ip.clone(),
+            cfg.server_port.clone(),
+            cfg.client_id.clone(),
+            cfg.version.clone(),
+        )
+    };
 
-    let hello = format!("HELLO {} {}\n", CLIENT_ID, VERSION);
+    let mut stream = TcpStream::connect(format!("{}:{}", ip, port)).await?;
+
+    let hello = format!("HELLO {} {}\n", client_id, version);
+
     stream.write_all(hello.as_bytes()).await?;
 
     let mut buffer = [0u8; 1024];
@@ -104,7 +139,7 @@ async fn root_server_task(
 
     let info = format!(
         "INFO user {}\n{{\"name\":\"{}\",\"regno\":\"{}\"}}\n",
-        VERSION, u.name, u.reg
+        version, u.name, u.reg
     );
 
     stream.write_all(info.as_bytes()).await?;
@@ -184,15 +219,18 @@ async fn run_unix_server(
     shutdown_tx: broadcast::Sender<()>,
     mut shutdown: broadcast::Receiver<()>,
     user: SharedUser,
+    config: SharedConfig,
     server_tx: mpsc::Sender<String>,
 ) -> Result<()> {
-    if Path::new(UNIX_SOCKET).exists() {
-        std::fs::remove_file(UNIX_SOCKET)?;
+    let unix_socket = config.lock().await.unix_socket.clone();
+
+    if Path::new(&unix_socket).exists() {
+        std::fs::remove_file(&unix_socket)?;
     }
 
-    let listener = UnixListener::bind(UNIX_SOCKET)?;
+    let listener = UnixListener::bind(&unix_socket)?;
 
-    println!("Unix control socket ready {}", UNIX_SOCKET);
+    println!("Unix control socket ready {}", unix_socket);
 
     loop {
         tokio::select! {
@@ -209,6 +247,7 @@ async fn run_unix_server(
                 let shutdown_clone = shutdown_tx.clone();
                 let user_clone = user.clone();
                 let server_tx_clone = server_tx.clone();
+                let config_clone = config.clone();
 
                 tokio::spawn(async move {
 
@@ -216,6 +255,7 @@ async fn run_unix_server(
                         stream,
                         shutdown_clone,
                         user_clone,
+                        config_clone,
                         server_tx_clone
                     ).await {
 
@@ -234,6 +274,7 @@ async fn handle_unix(
     mut stream: UnixStream,
     shutdown_tx: broadcast::Sender<()>,
     user: SharedUser,
+    config: SharedConfig,
     server_tx: mpsc::Sender<String>,
 ) -> Result<()> {
     let mut buffer = [0u8; 1024];
@@ -277,7 +318,35 @@ async fn handle_unix(
 
             let info = format!(
                 "INFO user {}\n{{\"name\":\"{}\",\"regno\":\"{}\"}}\n",
-                VERSION, u.name, u.reg
+                config.lock().await.version,
+                u.name,
+                u.reg
+            );
+
+            server_tx.send(info).await?;
+        }
+
+        stream.write_all(b"Info updated\n").await?;
+    } else if cmd == "-logout" {
+        let name: Option<String> = Some("unknown".to_string());
+        let reg: Option<String> = Some("unknown".to_string());
+
+        {
+            let mut u = user.lock().await;
+
+            if let Some(n) = name {
+                u.name = n;
+            }
+
+            if let Some(r) = reg {
+                u.reg = r;
+            }
+
+            let info = format!(
+                "INFO user {}\n{{\"name\":\"{}\",\"regno\":\"{}\"}}\n",
+                config.lock().await.version,
+                u.name,
+                u.reg
             );
 
             server_tx.send(info).await?;
