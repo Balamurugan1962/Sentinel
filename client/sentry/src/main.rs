@@ -9,17 +9,13 @@ use tokio::{
     time::sleep,
 };
 
-use crate::config::{Config, SharedConfig};
+use crate::{
+    config::{Config, SharedConfig},
+    user::{SharedUser, UserInfo},
+};
 
 mod config;
-
-#[derive(Default)]
-struct UserInfo {
-    name: String,
-    reg: String,
-}
-
-type SharedUser = Arc<Mutex<UserInfo>>;
+mod user;
 
 fn main() -> Result<()> {
     let config = Config::new();
@@ -63,10 +59,7 @@ async fn async_main(config: SharedConfig) -> Result<()> {
         println!("[SENTRY] Sentry daemon starting");
     }
 
-    let user: SharedUser = Arc::new(Mutex::new(UserInfo {
-        name: "unknown".into(),
-        reg: "unknown".into(),
-    }));
+    let user: SharedUser = Arc::new(Mutex::new(UserInfo::new()));
 
     let (network_tx, network_rx) = mpsc::channel::<String>(100);
     let (server_tx, server_rx) = mpsc::channel::<String>(100);
