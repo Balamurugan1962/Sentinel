@@ -1,6 +1,6 @@
 use anyhow::Result;
 use daemonize::Daemonize;
-use std::{fs::File, net::Ipv4Addr, sync::Arc};
+use std::{fs::File, sync::Arc};
 use tokio::{
     runtime::Builder,
     sync::{broadcast, mpsc, Mutex},
@@ -8,12 +8,14 @@ use tokio::{
 
 use crate::{
     config::{Config, SharedConfig},
+    monitor::network::network_task,
     tcp::root_server_task,
     unix::run_unix_server,
     user::{SharedUser, UserInfo},
 };
 
 mod config;
+mod monitor;
 mod tcp;
 mod unix;
 mod user;
@@ -78,7 +80,7 @@ async fn async_main(config: SharedConfig) -> Result<()> {
         shutdown_root,
     ));
 
-    tokio::spawn(network_logger_task(network_rx));
+    tokio::spawn(network_task(network_rx));
 
     run_unix_server(
         shutdown_tx,
@@ -90,32 +92,4 @@ async fn async_main(config: SharedConfig) -> Result<()> {
     .await?;
 
     Ok(())
-}
-
-async fn network_logger_task(mut rx: mpsc::Receiver<String>) -> Result<()> {
-    println!("[NETWORK] Firewall ready");
-
-    while let Some(message) = rx.recv().await {
-        println!("[NETWORK] {}", message.trim());
-
-        if let Some(ip_str) = parse_block_ip(&message) {
-            let ip: u32 = ip_str.parse::<Ipv4Addr>()?.into();
-
-            println!("[NETWORK] Blocking {}", ip_str);
-
-            let _ = ip;
-        }
-    }
-
-    Ok(())
-}
-
-fn parse_block_ip(message: &str) -> Option<&str> {
-    let parts: Vec<&str> = message.trim().split_whitespace().collect();
-
-    if parts.len() == 4 && parts[0] == "ACTION" && parts[1] == "network" && parts[2] == "BLOCK" {
-        return Some(parts[3]);
-    }
-
-    None
 }
