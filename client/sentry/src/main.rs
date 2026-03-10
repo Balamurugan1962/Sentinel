@@ -7,17 +7,17 @@ use tokio::{
 };
 
 use crate::{
+    bridge::main::run_http_server,
     config::{Config, SharedConfig},
     monitor::init::start_monitor,
     tcp::root_server_task,
-    unix::run_unix_server,
     user::{SharedUser, UserInfo},
 };
 
+mod bridge;
 mod config;
 mod monitor;
 mod tcp;
-mod unix;
 mod user;
 
 fn main() -> Result<()> {
@@ -67,7 +67,7 @@ async fn async_main(config: SharedConfig) -> Result<()> {
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
 
     let shutdown_root = shutdown_tx.subscribe();
-    let shutdown_unix = shutdown_tx.subscribe();
+    let shutdown_http = shutdown_tx.subscribe();
 
     tokio::spawn(root_server_task(
         network_tx,
@@ -79,9 +79,9 @@ async fn async_main(config: SharedConfig) -> Result<()> {
 
     tokio::spawn(start_monitor(network_rx, shutdown_tx.subscribe()));
 
-    run_unix_server(
+    run_http_server(
         shutdown_tx,
-        shutdown_unix,
+        shutdown_http,
         user.clone(),
         config.clone(),
         server_tx,
