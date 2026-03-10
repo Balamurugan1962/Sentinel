@@ -4,16 +4,21 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::Builder;
 use tokio::sync::{broadcast, mpsc, Mutex};
+
+use crate::bridge::main::start_http;
 
 struct ClientMeta {
     tx: mpsc::Sender<String>,
     name: String,
     reg: String,
 }
+
+mod bridge;
 
 type Clients = Arc<Mutex<HashMap<usize, ClientMeta>>>;
 static CLIENT_COUNTER: AtomicUsize = AtomicUsize::new(1);
@@ -59,7 +64,7 @@ async fn async_main() -> Result<()> {
     let shutdown_tx_unix = shutdown_tx.clone();
 
     tokio::spawn(async move {
-        if let Err(e) = run_unix_server(unix_clients, shutdown_tx_unix, unix_shutdown).await {
+        if let Err(e) = start_http(unix_clients, shutdown_tx_unix, unix_shutdown).await {
             eprintln!("Unix server error: {:?}", e);
         }
     });
@@ -119,173 +124,66 @@ async fn run_tcp_server(clients: Clients, mut shutdown: broadcast::Receiver<()>)
 
 async fn handle_tcp(
     id: usize,
-    mut stream: TcpStream,
+    stream: TcpStream,
     mut rx: mpsc::Receiver<String>,
     clients: Clients,
 ) {
-    let mut buffer = [0u8; 1024];
+    let (read_half, mut write_half) = stream.into_split();
+    let mut reader = BufReader::new(read_half);
+    let mut line = String::new();
 
     loop {
         tokio::select! {
 
-            result = stream.read(&mut buffer) => {
+            result = reader.read_line(&mut line) => {
 
                 match result {
 
-                    Ok(0)=>{
-                        println!("Client {} disconnected",id);
+                    Ok(0) => {
+                        println!("Client {} disconnected", id);
                         clients.lock().await.remove(&id);
                         return;
                     }
 
-                    Ok(n)=>{
+                    Ok(_) => {
 
-                        let message = String::from_utf8_lossy(&buffer[..n]).to_string();
+                        let message = line.trim().to_string();
+                        line.clear();
 
-                        println!("From {}: {}", id, message.trim());
+                        println!("From {}: {}", id, message);
 
-                        if message.starts_with("INFO") {
+                        if message.starts_with('{') {
 
-                            if let Some(json_start) = message.find('{') {
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&message) {
 
-                                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&message[json_start..]) {
+                                let mut guard = clients.lock().await;
 
-                                    let mut guard = clients.lock().await;
+                                if let Some(meta) = guard.get_mut(&id) {
 
-                                    if let Some(meta) = guard.get_mut(&id) {
-
-                                        if let Some(name) = v["name"].as_str() {
-                                            meta.name = name.to_string();
-                                        }
-
-                                        if let Some(reg) = v["regno"].as_str() {
-                                            meta.reg = reg.to_string();
-                                        }
+                                    if let Some(name) = v["name"].as_str() {
+                                        meta.name = name.to_string();
                                     }
+
+                                    if let Some(reg) = v["regno"].as_str() {
+                                        meta.reg = reg.to_string();
+                                    }
+
+                                    println!("Updated client {} -> {} {}", id, meta.name, meta.reg);
                                 }
                             }
                         }
                     }
 
-                    Err(_)=>{
+                    Err(_) => {
                         clients.lock().await.remove(&id);
                         return;
                     }
                 }
             }
 
-            Some(msg)=rx.recv()=>{
-                let _ = stream.write_all(msg.as_bytes()).await;
+            Some(msg) = rx.recv() => {
+                let _ = write_half.write_all(msg.as_bytes()).await;
             }
         }
     }
-}
-
-async fn run_unix_server(
-    clients: Clients,
-    shutdown_tx: broadcast::Sender<()>,
-    mut shutdown: broadcast::Receiver<()>,
-) -> Result<()> {
-    let path = "/tmp/sentinel.sock";
-
-    if std::path::Path::new(path).exists() {
-        std::fs::remove_file(path)?;
-    }
-
-    let listener = UnixListener::bind(path)?;
-
-    loop {
-        tokio::select! {
-
-            _ = shutdown.recv()=>{
-                println!("Unix server shutting down...");
-                break;
-            }
-
-            result = listener.accept()=>{
-
-                let (stream,_) = result?;
-
-                let clients_clone=clients.clone();
-                let shutdown_clone=shutdown_tx.clone();
-
-                tokio::spawn(async move{
-
-                    if let Err(e)=handle_unix(stream,clients_clone,shutdown_clone).await{
-                        eprintln!("Unix handler error {:?}",e);
-                    }
-
-                });
-            }
-        }
-    }
-
-    Ok(())
-}
-
-async fn handle_unix(
-    mut stream: UnixStream,
-    clients: Clients,
-    shutdown_tx: broadcast::Sender<()>,
-) -> Result<()> {
-    let mut buffer = [0u8; 1024];
-    let n = stream.read(&mut buffer).await?;
-    let cmd = String::from_utf8_lossy(&buffer[..n]).trim().to_string();
-
-    match cmd.as_str() {
-        "-status" => {
-            stream.write_all(b"Status: Active\n").await?;
-        }
-
-        "-ls" => {
-            let guard = clients.lock().await;
-
-            let list: Vec<_> = guard
-                .iter()
-                .map(|(id, meta)| {
-                    serde_json::json!({
-                        "id":id,
-                        "name":meta.name,
-                        "reg":meta.reg
-                    })
-                })
-                .collect();
-
-            let json = serde_json::to_string(&list)?;
-            stream.write_all(json.as_bytes()).await?;
-        }
-
-        "-stop" => {
-            stream.write_all(b"Stopping Sentinel\n").await?;
-            let _ = shutdown_tx.send(());
-        }
-
-        _ if cmd.starts_with("-send") => {
-            let parts: Vec<&str> = cmd.splitn(3, ' ').collect();
-
-            if parts.len() < 3 {
-                stream.write_all(b"Usage: -send <id> <message>\n").await?;
-                return Ok(());
-            }
-
-            let id: usize = parts[1].parse().unwrap_or(0);
-            let message = parts[2].to_string();
-
-            let guard = clients.lock().await;
-
-            if let Some(client) = guard.get(&id) {
-                let _ = client.tx.send(format!("{}\n", message)).await;
-
-                stream.write_all(b"Message sent\n").await?;
-            } else {
-                stream.write_all(b"Client not found\n").await?;
-            }
-        }
-
-        _ => {
-            stream.write_all(b"Unknown command\n").await?;
-        }
-    }
-
-    Ok(())
 }
