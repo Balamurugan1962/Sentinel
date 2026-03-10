@@ -5,6 +5,7 @@ use tokio::{
     runtime::Builder,
     sync::{broadcast, mpsc, Mutex},
 };
+use tracing_subscriber::EnvFilter;
 
 use crate::{
     bridge::main::run_http_server,
@@ -23,7 +24,9 @@ mod user;
 fn main() -> Result<()> {
     let config = Config::new();
     let verbose = config.verbose;
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::new("info,rdkafka=off"))
+        .init();
 
     if config.daemonize {
         daemonize(&config)?;
