@@ -25,7 +25,7 @@ fn main() -> Result<()> {
     let verbose = config.verbose;
     tracing_subscriber::fmt::init();
 
-    daemonize(&config)?;
+    // daemonize(&config)?;
 
     if verbose {
         println!("[SENTRY] Daemon Started!");
