@@ -1,0 +1,14 @@
+{
+  "name": "Sentinel Browser Monitor",
+  "description": "Send visited sites to Sentinel agent",
+  "version": "1.0",
+  "manifest_version": 3,
+
+  "permissions": ["tabs", "webNavigation"],
+
+  "host_permissions": ["<all_urls>"],
+
+  "background": {
+    "service_worker": "background.js"
+  }
+}
