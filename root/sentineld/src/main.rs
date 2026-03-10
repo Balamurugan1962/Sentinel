@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 use tokio::runtime::Builder;
@@ -119,63 +120,65 @@ async fn run_tcp_server(clients: Clients, mut shutdown: broadcast::Receiver<()>)
 
 async fn handle_tcp(
     id: usize,
-    mut stream: TcpStream,
+    stream: TcpStream,
     mut rx: mpsc::Receiver<String>,
     clients: Clients,
 ) {
-    let mut buffer = [0u8; 1024];
+    let (read_half, mut write_half) = stream.into_split();
+    let mut reader = BufReader::new(read_half);
+    let mut line = String::new();
 
     loop {
         tokio::select! {
 
-            result = stream.read(&mut buffer) => {
+            result = reader.read_line(&mut line) => {
 
                 match result {
 
-                    Ok(0)=>{
-                        println!("Client {} disconnected",id);
+                    Ok(0) => {
+                        println!("Client {} disconnected", id);
                         clients.lock().await.remove(&id);
                         return;
                     }
 
-                    Ok(n)=>{
+                    Ok(_) => {
 
-                        let message = String::from_utf8_lossy(&buffer[..n]).to_string();
+                        let message = line.trim().to_string();
+                        line.clear();
 
-                        println!("From {}: {}", id, message.trim());
+                        println!("From {}: {}", id, message);
 
-                        if message.starts_with("INFO") {
+                        if message.starts_with('{') {
 
-                            if let Some(json_start) = message.find('{') {
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&message) {
 
-                                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&message[json_start..]) {
+                                let mut guard = clients.lock().await;
 
-                                    let mut guard = clients.lock().await;
+                                if let Some(meta) = guard.get_mut(&id) {
 
-                                    if let Some(meta) = guard.get_mut(&id) {
-
-                                        if let Some(name) = v["name"].as_str() {
-                                            meta.name = name.to_string();
-                                        }
-
-                                        if let Some(reg) = v["regno"].as_str() {
-                                            meta.reg = reg.to_string();
-                                        }
+                                    if let Some(name) = v["name"].as_str() {
+                                        meta.name = name.to_string();
                                     }
+
+                                    if let Some(reg) = v["regno"].as_str() {
+                                        meta.reg = reg.to_string();
+                                    }
+
+                                    println!("Updated client {} -> {} {}", id, meta.name, meta.reg);
                                 }
                             }
                         }
                     }
 
-                    Err(_)=>{
+                    Err(_) => {
                         clients.lock().await.remove(&id);
                         return;
                     }
                 }
             }
 
-            Some(msg)=rx.recv()=>{
-                let _ = stream.write_all(msg.as_bytes()).await;
+            Some(msg) = rx.recv() => {
+                let _ = write_half.write_all(msg.as_bytes()).await;
             }
         }
     }
