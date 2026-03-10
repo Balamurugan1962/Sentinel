@@ -6,15 +6,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::Builder;
 use tokio::sync::{broadcast, mpsc, Mutex};
+
+use crate::bridge::main::start_http;
 
 struct ClientMeta {
     tx: mpsc::Sender<String>,
     name: String,
     reg: String,
 }
+
+mod bridge;
 
 type Clients = Arc<Mutex<HashMap<usize, ClientMeta>>>;
 static CLIENT_COUNTER: AtomicUsize = AtomicUsize::new(1);
@@ -60,7 +64,7 @@ async fn async_main() -> Result<()> {
     let shutdown_tx_unix = shutdown_tx.clone();
 
     tokio::spawn(async move {
-        if let Err(e) = run_unix_server(unix_clients, shutdown_tx_unix, unix_shutdown).await {
+        if let Err(e) = start_http(unix_clients, shutdown_tx_unix, unix_shutdown).await {
             eprintln!("Unix server error: {:?}", e);
         }
     });
@@ -182,113 +186,4 @@ async fn handle_tcp(
             }
         }
     }
-}
-
-async fn run_unix_server(
-    clients: Clients,
-    shutdown_tx: broadcast::Sender<()>,
-    mut shutdown: broadcast::Receiver<()>,
-) -> Result<()> {
-    let path = "/tmp/sentinel.sock";
-
-    if std::path::Path::new(path).exists() {
-        std::fs::remove_file(path)?;
-    }
-
-    let listener = UnixListener::bind(path)?;
-
-    loop {
-        tokio::select! {
-
-            _ = shutdown.recv()=>{
-                println!("Unix server shutting down...");
-                break;
-            }
-
-            result = listener.accept()=>{
-
-                let (stream,_) = result?;
-
-                let clients_clone=clients.clone();
-                let shutdown_clone=shutdown_tx.clone();
-
-                tokio::spawn(async move{
-
-                    if let Err(e)=handle_unix(stream,clients_clone,shutdown_clone).await{
-                        eprintln!("Unix handler error {:?}",e);
-                    }
-
-                });
-            }
-        }
-    }
-
-    Ok(())
-}
-
-async fn handle_unix(
-    mut stream: UnixStream,
-    clients: Clients,
-    shutdown_tx: broadcast::Sender<()>,
-) -> Result<()> {
-    let mut buffer = [0u8; 1024];
-    let n = stream.read(&mut buffer).await?;
-    let cmd = String::from_utf8_lossy(&buffer[..n]).trim().to_string();
-
-    match cmd.as_str() {
-        "-status" => {
-            stream.write_all(b"Status: Active\n").await?;
-        }
-
-        "-ls" => {
-            let guard = clients.lock().await;
-
-            let list: Vec<_> = guard
-                .iter()
-                .map(|(id, meta)| {
-                    serde_json::json!({
-                        "id":id,
-                        "name":meta.name,
-                        "reg":meta.reg
-                    })
-                })
-                .collect();
-
-            let json = serde_json::to_string(&list)?;
-            stream.write_all(json.as_bytes()).await?;
-        }
-
-        "-stop" => {
-            stream.write_all(b"Stopping Sentinel\n").await?;
-            let _ = shutdown_tx.send(());
-        }
-
-        _ if cmd.starts_with("-send") => {
-            let parts: Vec<&str> = cmd.splitn(3, ' ').collect();
-
-            if parts.len() < 3 {
-                stream.write_all(b"Usage: -send <id> <message>\n").await?;
-                return Ok(());
-            }
-
-            let id: usize = parts[1].parse().unwrap_or(0);
-            let message = parts[2].to_string();
-
-            let guard = clients.lock().await;
-
-            if let Some(client) = guard.get(&id) {
-                let _ = client.tx.send(format!("{}\n", message)).await;
-
-                stream.write_all(b"Message sent\n").await?;
-            } else {
-                stream.write_all(b"Client not found\n").await?;
-            }
-        }
-
-        _ => {
-            stream.write_all(b"Unknown command\n").await?;
-        }
-    }
-
-    Ok(())
 }

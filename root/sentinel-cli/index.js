@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 
-const net = require("net");
-
-const SOCKET_PATH = "/tmp/sentinel.sock";
+const BASE_URL = "http://127.0.0.1:3737";
 
 function formatTable(data) {
   if (!data.length) {
@@ -11,7 +9,6 @@ function formatTable(data) {
   }
 
   const header = ["Client", "Name", "Reg"];
-
   const widths = [10, 20, 20];
 
   const line = (cols) =>
@@ -25,44 +22,42 @@ function formatTable(data) {
   }
 }
 
-function sendCommand(command) {
-  const client = net.createConnection(SOCKET_PATH);
-
-  let buffer = "";
-
-  client.on("connect", () => {
-    client.write(command);
-  });
-
-  client.on("data", (data) => {
-    buffer += data.toString();
-  });
-
-  client.on("end", () => {
-    try {
-      const json = JSON.parse(buffer);
-
-      if (Array.isArray(json)) {
-        formatTable(json);
-      } else {
-        console.log(json);
-      }
-    } catch {
-      console.log(buffer);
-    }
-  });
-
-  client.on("error", (err) => {
-    console.error("Cannot connect to sentinel daemon");
+async function get(path) {
+  try {
+    const res = await fetch(`${BASE_URL}${path}`);
+    const data = await res.json();
+    return data;
+  } catch (err) {
+    console.error("Cannot connect to sentinel server");
     console.error(err.message);
     process.exit(1);
-  });
+  }
 }
 
-const args = process.argv.slice(2);
+async function post(path, body = {}) {
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
 
-if (args.length === 0) {
-  console.log(`
+    const data = await res.json();
+    return data;
+  } catch (err) {
+    console.error("Cannot connect to sentinel server");
+    console.error(err.message);
+    process.exit(1);
+  }
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+
+  if (args.length === 0) {
+    console.log(`
 Sentinel CLI
 
 Usage:
@@ -71,36 +66,54 @@ Usage:
   sentinel stop
   sentinel send <id> <message>
 `);
-  process.exit(0);
-}
+    process.exit(0);
+  }
 
-const cmd = args[0];
+  const cmd = args[0];
 
-switch (cmd) {
-  case "status":
-    sendCommand("-status");
-    break;
-
-  case "ls":
-    sendCommand("-ls");
-    break;
-
-  case "stop":
-    sendCommand("-stop");
-    break;
-
-  case "send":
-    if (args.length < 3) {
-      console.log("Usage: sentinel send <id> <message>");
-      process.exit(1);
+  switch (cmd) {
+    case "status": {
+      const res = await get("/status");
+      console.log(res.message || res);
+      break;
     }
 
-    const id = args[1];
-    const message = args.slice(2).join(" ");
+    case "ls": {
+      const res = await get("/clients");
 
-    sendCommand(`-send ${id} ${message}`);
-    break;
+      if (Array.isArray(res)) {
+        formatTable(res);
+      } else {
+        console.log(res);
+      }
 
-  default:
-    console.log("Unknown command");
+      break;
+    }
+
+    case "stop": {
+      const res = await post("/stop");
+      console.log(res.message || res);
+      break;
+    }
+
+    case "send": {
+      if (args.length < 3) {
+        console.log("Usage: sentinel send <id> <message>");
+        process.exit(1);
+      }
+
+      const id = parseInt(args[1]);
+      const message = args.slice(2).join(" ");
+
+      const res = await post("/send", { id, message });
+
+      console.log(res.message || res);
+      break;
+    }
+
+    default:
+      console.log("Unknown command");
+  }
 }
+
+main();
