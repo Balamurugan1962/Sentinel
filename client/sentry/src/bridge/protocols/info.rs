@@ -25,11 +25,9 @@ pub async fn info(
         version, u.name, u.reg
     );
 
-    state
-        .server_tx
-        .send(info)
-        .await
-        .map_err(|e| e.to_string())?;
+    if let Err(e) = state.server_tx.send(info).await {
+        eprintln!("server channel closed: {}", e);
+    }
 
     Ok("Info updated".to_string())
 }
