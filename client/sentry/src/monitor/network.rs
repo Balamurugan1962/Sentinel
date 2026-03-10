@@ -1,13 +1,16 @@
 use anyhow::Result;
 use std::net::Ipv4Addr;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 // TODO:
 // need to have three async functions
 // 1. mpsc listener for action protocol
 // 2. DNS proxy server firewall
 // 3. eBPF kernel level firewall (need to decide weather to add)
-pub async fn network_task(mut rx: mpsc::Receiver<String>) -> Result<()> {
+pub async fn network_task(
+    mut rx: mpsc::Receiver<String>,
+    _shutdown_tx: broadcast::Receiver<()>,
+) -> Result<()> {
     println!("[NETWORK] Firewall ready");
 
     while let Some(message) = rx.recv().await {
