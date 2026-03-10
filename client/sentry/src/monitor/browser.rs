@@ -31,7 +31,7 @@ fn create_kafka_producer(kafka_ip: &str) -> FutureProducer {
 }
 
 // Need to test and ensure this
-fn enforce_firefox_policy() {
+fn _enforce_firefox_policy() {
     if !Path::new("/usr/bin/firefox").exists() {
         println!("Firefox not installed, skipping policy.");
         return;
@@ -65,9 +65,9 @@ fn enforce_firefox_policy() {
     println!("Firefox policy enforced");
 }
 
-fn enforce_policy() {
+fn _enforce_policy() {
     #[cfg(target_os = "linux")]
-    enforce_firefox_policy();
+    _enforce_firefox_policy();
 }
 
 async fn log(State(state): State<Arc<AppState>>, Json(data): Json<Visit>) {
