@@ -8,7 +8,7 @@ use tokio::{
 
 use crate::{
     config::{Config, SharedConfig},
-    monitor::network::network_task,
+    monitor::init::start_monitor,
     tcp::root_server_task,
     unix::run_unix_server,
     user::{SharedUser, UserInfo},
@@ -23,11 +23,6 @@ mod user;
 fn main() -> Result<()> {
     let config = Config::new();
     let verbose = config.verbose;
-
-    if verbose {
-        println!("[SENTRY] Start state started!");
-    }
-
     tracing_subscriber::fmt::init();
 
     daemonize(&config)?;
@@ -80,7 +75,7 @@ async fn async_main(config: SharedConfig) -> Result<()> {
         shutdown_root,
     ));
 
-    tokio::spawn(network_task(network_rx));
+    tokio::spawn(start_monitor(network_rx, shutdown_tx.subscribe()));
 
     run_unix_server(
         shutdown_tx,
