@@ -1,6 +1,7 @@
 use axum::extract::State;
 use axum::{routing::post, Json, Router};
-use rdkafka::producer::{FutureProducer, FutureRecord};
+use rdkafka::config::RDKafkaLogLevel;
+use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
 use rdkafka::ClientConfig;
 use serde::Deserialize;
 use serde_json::json;
@@ -8,6 +9,7 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, path::Path};
+use tokio::time::sleep;
 use tokio::{net::TcpListener, sync::broadcast};
 use tower_http::cors::{Any, CorsLayer};
 
@@ -23,15 +25,38 @@ struct AppState {
     producer: FutureProducer,
 }
 
-fn create_kafka_producer(kafka_ip: &str) -> FutureProducer {
-    ClientConfig::new()
-        .set("bootstrap.servers", kafka_ip)
-        .create()
-        .expect("Failed to create Kafka producer")
+async fn create_kafka_producer(kafka_ip: &str) -> FutureProducer {
+    loop {
+        match ClientConfig::new()
+            .set("bootstrap.servers", kafka_ip)
+            .set("log_level", "0")
+            .set_log_level(RDKafkaLogLevel::Emerg)
+            .create::<FutureProducer>()
+        {
+            Ok(producer) => {
+                match producer
+                    .client()
+                    .fetch_metadata(None, Duration::from_secs(2))
+                {
+                    Ok(_) => {
+                        println!("[SENTRY] Kafka connected");
+                        return producer;
+                    }
+                    Err(_e) => {
+                        println!("[KAFKA]: Kafka not ready. retrying...");
+                    }
+                }
+            }
+            Err(_e) => {
+                println!("[KAFKA]: Failed creating producer");
+            }
+        }
+        sleep(Duration::from_secs(10)).await;
+    }
 }
 
 // Need to test and ensure this
-fn enforce_firefox_policy() {
+fn _enforce_firefox_policy() {
     if !Path::new("/usr/bin/firefox").exists() {
         println!("Firefox not installed, skipping policy.");
         return;
@@ -65,9 +90,9 @@ fn enforce_firefox_policy() {
     println!("Firefox policy enforced");
 }
 
-fn enforce_policy() {
+fn _enforce_policy() {
     #[cfg(target_os = "linux")]
-    enforce_firefox_policy();
+    _enforce_firefox_policy();
 }
 
 async fn log(State(state): State<Arc<AppState>>, Json(data): Json<Visit>) {
@@ -96,7 +121,7 @@ pub async fn browser_monitor(_shutdown_tx: broadcast::Receiver<()>) {
     // need to hook it with config
 
     let kafka_ip = "127.0.0.1";
-    let producer = create_kafka_producer(kafka_ip);
+    let producer = create_kafka_producer(kafka_ip).await;
 
     let state = Arc::new(AppState { producer });
 
