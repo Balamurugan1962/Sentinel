@@ -16,6 +16,8 @@ pub struct Config {
     pub pid: String,
 
     pub verbose: bool,
+
+    pub daemonize: bool,
 }
 
 impl Config {
@@ -34,6 +36,8 @@ impl Config {
             pid: "/tmp/sentry.pid".to_string(),
 
             verbose: true,
+
+            daemonize: false,
         }
     }
 }
