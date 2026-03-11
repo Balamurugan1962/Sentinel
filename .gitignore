@@ -6,5 +6,6 @@ __pycache__/
 target/
 
 data
+node_modules
 
 .DS_Store

@@ -120,7 +120,7 @@ pub async fn browser_monitor(_shutdown_tx: broadcast::Receiver<()>) {
     // TODO:
     // need to hook it with config
 
-    let kafka_ip = "127.0.0.1";
+    let kafka_ip = "127.0.0.1:9092";
     let producer = create_kafka_producer(kafka_ip).await;
 
     let state = Arc::new(AppState { producer });
