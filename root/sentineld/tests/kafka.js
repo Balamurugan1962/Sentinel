@@ -7,7 +7,7 @@ ws.on("open", () => {
 
   ws.send(
     JSON.stringify({
-      topic: "1-browser",
+      topic: "27-browser",
     }),
   );
 });
