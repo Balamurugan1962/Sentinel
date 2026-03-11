@@ -1,4 +1,5 @@
 use anyhow::Result;
+use axum::{extract::ws::WebSocketUpgrade, response::IntoResponse};
 use axum::{
     extract::State,
     routing::{get, post},
@@ -27,6 +28,12 @@ struct SendRequest {
     message: String,
 }
 
+async fn ws_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
+    ws.on_upgrade(|socket| async move {
+        crate::bridge::kafka_ws::handle_ws(socket).await;
+    })
+}
+
 pub async fn start_http(
     clients: Clients,
     shutdown_tx: broadcast::Sender<()>,
@@ -42,6 +49,7 @@ pub async fn start_http(
         .route("/clients", get(list_clients))
         .route("/send", post(send_message))
         .route("/stop", post(stop_server))
+        .route("/kafka/ws", get(ws_handler))
         .with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:3737").await?;
