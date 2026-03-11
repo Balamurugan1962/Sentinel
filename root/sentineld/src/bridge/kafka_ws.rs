@@ -6,6 +6,7 @@ use rdkafka::{
     consumer::{Consumer, StreamConsumer},
 };
 use serde::Deserialize;
+use uuid::Uuid;
 
 #[derive(Deserialize)]
 struct SubscribeRequest {
@@ -33,9 +34,11 @@ pub async fn handle_ws(mut socket: WebSocket) {
 
     println!("Subscribing to topic: {}", sub.topic);
 
+    let group_id = format!("sentinel-ws-{}", Uuid::new_v4());
+
     let consumer: StreamConsumer = match ClientConfig::new()
         .set("bootstrap.servers", "localhost:9092")
-        .set("group.id", "sentinel-ws")
+        .set("group.id", group_id)
         .set("auto.offset.reset", "earliest")
         .create()
     {

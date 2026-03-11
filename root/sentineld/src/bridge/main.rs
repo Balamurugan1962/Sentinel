@@ -1,4 +1,5 @@
 use anyhow::Result;
+use axum::http::Method;
 use axum::{extract::ws::WebSocketUpgrade, response::IntoResponse};
 use axum::{
     extract::State,
@@ -8,6 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
+use tower_http::cors::{Any, CorsLayer};
 
 use crate::Clients;
 
@@ -44,13 +46,19 @@ pub async fn start_http(
         shutdown: shutdown_tx.clone(),
     };
 
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+        .allow_headers(Any);
+
     let app = Router::new()
         .route("/status", get(status))
         .route("/clients", get(list_clients))
         .route("/send", post(send_message))
         .route("/stop", post(stop_server))
         .route("/kafka/ws", get(ws_handler))
-        .with_state(state);
+        .with_state(state)
+        .layer(cors);
 
     let listener = TcpListener::bind("127.0.0.1:3737").await?;
 
@@ -85,7 +93,7 @@ async fn list_clients(State(state): State<AppState>) -> Json<serde_json::Value> 
             serde_json::json!({
                 "id": id,
                 "name": meta.name,
-                "reg": meta.reg
+                "register": meta.reg
             })
         })
         .collect();

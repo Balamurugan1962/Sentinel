@@ -8,7 +8,7 @@ function formatTable(data) {
     return;
   }
 
-  const header = ["Client", "Name", "Reg"];
+  const header = ["Client", "Name", "Register"];
   const widths = [10, 20, 20];
 
   const line = (cols) =>
@@ -18,7 +18,7 @@ function formatTable(data) {
   console.log("-".repeat(10) + "-+-" + "-".repeat(20) + "-+-" + "-".repeat(20));
 
   for (const c of data) {
-    console.log(line([c.id, c.name, c.reg]));
+    console.log(line([c.id, c.name, c.register]));
   }
 }
 

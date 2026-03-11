@@ -108,7 +108,7 @@ async fn log(State(state): State<Arc<AppState>>, Json(data): Json<Visit>) {
         .producer
         .send(
             // Topic: [Client_id]-log-browser
-            FutureRecord::to("[client_id]-browser")
+            FutureRecord::to("27-browser")
                 .payload(&payload)
                 .key("visit"),
             Duration::from_secs(0),
