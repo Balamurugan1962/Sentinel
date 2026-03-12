@@ -11,10 +11,12 @@ use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
 
+use crate::config::SharedConfig;
 use crate::Clients;
 
 #[derive(Clone)]
-struct AppState {
+pub struct AppState {
+    pub config: SharedConfig,
     clients: Clients,
     shutdown: broadcast::Sender<()>,
 }
@@ -30,18 +32,22 @@ struct SendRequest {
     message: String,
 }
 
-async fn ws_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
+    let ip_addr = state.config.lock().await.server_ip.clone();
+
     ws.on_upgrade(|socket| async move {
-        crate::bridge::kafka_ws::handle_ws(socket).await;
+        crate::bridge::kafka_ws::handle_ws(socket, ip_addr).await;
     })
 }
 
 pub async fn start_http(
+    config: SharedConfig,
     clients: Clients,
     shutdown_tx: broadcast::Sender<()>,
     mut shutdown: broadcast::Receiver<()>,
 ) -> Result<()> {
     let state = AppState {
+        config,
         clients,
         shutdown: shutdown_tx.clone(),
     };
@@ -62,7 +68,7 @@ pub async fn start_http(
 
     let listener = TcpListener::bind("127.0.0.1:3737").await?;
 
-    println!("HTTP server listening on 127.0.0.1:3737");
+    println!("[HTTP]: server listening on 127.0.0.1:3737");
 
     tokio::select! {
 
