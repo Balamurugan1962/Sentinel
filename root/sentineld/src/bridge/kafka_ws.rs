@@ -13,7 +13,7 @@ struct SubscribeRequest {
     topic: String,
 }
 
-pub async fn handle_ws(mut socket: WebSocket) {
+pub async fn handle_ws(mut socket: WebSocket, ip_addr: String) {
     println!("WebSocket connected");
 
     let msg = match socket.next().await {
@@ -35,9 +35,10 @@ pub async fn handle_ws(mut socket: WebSocket) {
     println!("Subscribing to topic: {}", sub.topic);
 
     let group_id = format!("sentinel-ws-{}", Uuid::new_v4());
+    let server = format!("{}:9092", ip_addr);
 
     let consumer: StreamConsumer = match ClientConfig::new()
-        .set("bootstrap.servers", "localhost:9092")
+        .set("bootstrap.servers", server)
         .set("group.id", group_id)
         .set("auto.offset.reset", "earliest")
         .create()

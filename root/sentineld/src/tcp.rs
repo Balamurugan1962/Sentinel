@@ -5,10 +5,17 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc};
 
+use crate::config::SharedConfig;
 use crate::{ClientMeta, Clients, CLIENT_COUNTER};
 
-pub async fn run_tcp_server(clients: Clients, mut shutdown: broadcast::Receiver<()>) -> Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:1612").await?;
+pub async fn run_tcp_server(
+    config: SharedConfig,
+    clients: Clients,
+    mut shutdown: broadcast::Receiver<()>,
+) -> Result<()> {
+    let server_ip = config.lock().await.server_ip.clone();
+    let addr = format!("{}:1612", server_ip);
+    let listener = TcpListener::bind(addr).await?;
 
     loop {
         tokio::select! {
