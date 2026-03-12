@@ -17,6 +17,8 @@ pub async fn run_tcp_server(
     let addr = format!("{}:1612", server_ip);
     let listener = TcpListener::bind(addr).await?;
 
+    println!("[TCP]: Server Started at {}:1612", server_ip);
+
     loop {
         tokio::select! {
 

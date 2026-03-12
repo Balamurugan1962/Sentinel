@@ -68,7 +68,7 @@ pub async fn start_http(
 
     let listener = TcpListener::bind("127.0.0.1:3737").await?;
 
-    println!("HTTP server listening on 127.0.0.1:3737");
+    println!("[HTTP]: server listening on 127.0.0.1:3737");
 
     tokio::select! {
 
