@@ -7,7 +7,7 @@ use tokio::sync::{broadcast, mpsc};
 // 1. mpsc listener for action protocol
 // 2. DNS proxy server firewall
 // 3. eBPF kernel level firewall (need to decide weather to add)
-pub async fn network_task(
+pub async fn _network_task(
     mut rx: mpsc::Receiver<String>,
     _shutdown_tx: broadcast::Receiver<()>,
 ) -> Result<()> {
@@ -16,7 +16,7 @@ pub async fn network_task(
     while let Some(message) = rx.recv().await {
         println!("[NETWORK] {}", message.trim());
 
-        if let Some(ip_str) = parse_block_ip(&message) {
+        if let Some(ip_str) = _parse_block_ip(&message) {
             let ip: u32 = ip_str.parse::<Ipv4Addr>()?.into();
 
             println!("[NETWORK] Blocking {}", ip_str);
@@ -28,7 +28,7 @@ pub async fn network_task(
     Ok(())
 }
 
-fn parse_block_ip(message: &str) -> Option<&str> {
+fn _parse_block_ip(message: &str) -> Option<&str> {
     let parts: Vec<&str> = message.trim().split_whitespace().collect();
 
     if parts.len() == 4 && parts[0] == "ACTION" && parts[1] == "network" && parts[2] == "BLOCK" {

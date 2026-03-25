@@ -1,6 +1,6 @@
 use tokio::sync::{broadcast, mpsc};
 
-use crate::monitor::{browser::browser_monitor, network::network_task};
+use crate::monitor::browser::init::browser_monitor;
 
 pub async fn start_monitor(
     network_rx: mpsc::Receiver<String>,
@@ -8,6 +8,5 @@ pub async fn start_monitor(
 ) {
     println!("[SENTRY] Starting Monitor!");
 
-    tokio::spawn(browser_monitor(shutdown_tx.resubscribe()));
-    tokio::spawn(network_task(network_rx, shutdown_tx.resubscribe()));
+    tokio::spawn(browser_monitor(network_rx, shutdown_tx.resubscribe()));
 }

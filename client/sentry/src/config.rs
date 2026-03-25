@@ -24,7 +24,7 @@ impl Config {
             client_id: "27".to_string(),
             version: "0.1".to_string(),
 
-            server_ip: "127.0.0.1".to_string(),
+            server_ip: "10.106.192.86".to_string(),
             server_port: "1612".to_string(),
 
             stdout: "/tmp/sentry.out".to_string(),
