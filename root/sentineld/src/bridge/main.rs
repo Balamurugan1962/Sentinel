@@ -2,7 +2,7 @@ use anyhow::Result;
 use axum::http::Method;
 use axum::{extract::ws::WebSocketUpgrade, response::IntoResponse};
 use axum::{
-    extract::State,
+    extract::{Path, State},
     routing::{get, post},
     Json, Router,
 };
@@ -30,6 +30,25 @@ struct ApiResponse {
 struct SendRequest {
     id: usize,
     message: String,
+}
+
+#[derive(Deserialize)]
+struct PolicyRequest {
+    id: String,
+    action: String,
+    url: String,
+}
+
+pub fn extract_domain(url: &str) -> Option<String> {
+    let url_to_parse = if url.starts_with("http://") || url.starts_with("https://") {
+        url.to_string()
+    } else {
+        format!("http://{}", url)
+    };
+
+    url::Url::parse(&url_to_parse)
+        .ok()
+        .and_then(|u| u.host_str().map(|host| host.to_string()))
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
@@ -63,6 +82,8 @@ pub async fn start_http(
         .route("/send", post(send_message))
         .route("/stop", post(stop_server))
         .route("/kafka/ws", get(ws_handler))
+        .route("/policy", post(send_policy))
+        .route("/allowed_sites/{id}", get(get_allowed_sites))
         .with_state(state)
         .layer(cors);
 
@@ -132,4 +153,66 @@ async fn stop_server(State(state): State<AppState>) -> Json<ApiResponse> {
     Json(ApiResponse {
         message: "Stopping Sentinel".into(),
     })
+}
+
+async fn send_policy(
+    State(state): State<AppState>,
+    Json(req): Json<PolicyRequest>,
+) -> Json<ApiResponse> {
+    let domain = match extract_domain(&req.url) {
+        Some(d) => d,
+        None => return Json(ApiResponse { message: "Invalid URL".into() }),
+    };
+
+    let action = req.action.to_uppercase();
+    if action != "ALLOW" && action != "BLOCK" {
+        return Json(ApiResponse { message: "Invalid action (must be ALLOW or BLOCK)".into() });
+    }
+
+    let command = format!("ACTION network {} {}", action, domain);
+
+    let mut guard = state.clients.lock().await;
+
+    if req.id == "*" {
+        for client in guard.values_mut() {
+            if action == "ALLOW" {
+                client.allowed_sites.insert(domain.clone());
+            } else {
+                client.allowed_sites.remove(&domain);
+            }
+            let _ = client.tx.send(command.clone()).await;
+        }
+        return Json(ApiResponse { message: "Broadcasted policy to all clients".into() });
+    }
+
+    if let Ok(id) = req.id.parse::<usize>() {
+        if let Some(client) = guard.get_mut(&id) {
+            if action == "ALLOW" {
+                client.allowed_sites.insert(domain.clone());
+            } else {
+                client.allowed_sites.remove(&domain);
+            }
+            let _ = client.tx.send(command).await;
+            return Json(ApiResponse { message: "Policy sent".into() });
+        }
+    }
+
+    Json(ApiResponse { message: "Client not found".into() })
+}
+
+async fn get_allowed_sites(
+    Path(id): Path<usize>,
+    State(state): State<AppState>,
+) -> Json<serde_json::Value> {
+    let guard = state.clients.lock().await;
+
+    if let Some(client) = guard.get(&id) {
+        let sites: Vec<String> = client.allowed_sites.iter().cloned().collect();
+        Json(serde_json::json!({
+            "id": id,
+            "allowed_sites": sites
+        }))
+    } else {
+        Json(serde_json::json!({ "error": "Client not found" }))
+    }
 }

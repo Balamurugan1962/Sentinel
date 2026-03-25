@@ -65,6 +65,8 @@ Usage:
   sentinel ls
   sentinel stop
   sentinel send <id> <message>
+  sentinel policy <id|*> <ALLOW|BLOCK> <url>
+  sentinel allowed-sites <id>
 `);
     process.exit(0);
   }
@@ -108,6 +110,39 @@ Usage:
       const res = await post("/send", { id, message });
 
       console.log(res.message || res);
+      break;
+    }
+
+    case "policy": {
+      if (args.length < 4) {
+        console.log("Usage: sentinel policy <id|*> <ALLOW|BLOCK> <url>");
+        process.exit(1);
+      }
+      
+      const id = args[1];
+      const action = args[2];
+      const url = args[3];
+      
+      const res = await post("/policy", { id, action, url });
+      console.log(res.message || res);
+      break;
+    }
+
+    case "allowed-sites": {
+      if (args.length < 2) {
+        console.log("Usage: sentinel allowed-sites <id>");
+        process.exit(1);
+      }
+      
+      const id = args[1];
+      const res = await get(`/allowed_sites/${id}`);
+      
+      if (res.allowed_sites) {
+        console.log(`Allowed sites for client ${id}:`);
+        res.allowed_sites.forEach(s => console.log(` - ${s}`));
+      } else {
+        console.log(res.error || res);
+      }
       break;
     }
 

@@ -15,6 +15,7 @@ struct ClientMeta {
     tx: mpsc::Sender<String>,
     name: String,
     reg: String,
+    allowed_sites: std::collections::HashSet<String>,
 }
 
 mod bridge;

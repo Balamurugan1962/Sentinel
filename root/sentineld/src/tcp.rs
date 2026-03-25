@@ -50,7 +50,8 @@ pub async fn run_tcp_server(
                     ClientMeta{
                         tx,
                         name:"unknown".into(),
-                        reg:"unknown".into()
+                        reg:"unknown".into(),
+                        allowed_sites: std::collections::HashSet::from(["lms.ssn.edu.in".into()]),
                     }
                 );
 
