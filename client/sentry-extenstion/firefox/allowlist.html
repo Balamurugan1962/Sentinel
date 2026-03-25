@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Accessible Sites</title>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;1,9..144,300&family=DM+Sans:wght@300;400&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            :root {
+                --bg: #f7f6f3;
+                --text: #1a1916;
+                --muted: #9c9a95;
+                --line: #e2e0da;
+                --accent: #1a6b3c;
+            }
+
+            html,
+            body {
+                height: 100%;
+            }
+
+            body {
+                background: var(--bg);
+                color: var(--text);
+                font-family: "DM Sans", sans-serif;
+                font-weight: 300;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 24px;
+            }
+
+            .wrap {
+                max-width: 400px;
+                width: 100%;
+                opacity: 0;
+                transform: translateY(10px);
+                animation: appear 0.5s ease 0.1s forwards;
+            }
+
+            @keyframes appear {
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
+            .rule {
+                width: 32px;
+                height: 2px;
+                background: var(--accent);
+                margin-bottom: 32px;
+            }
+
+            h1 {
+                font-family: "Fraunces", serif;
+                font-size: clamp(24px, 5vw, 32px);
+                font-weight: 300;
+                line-height: 1.25;
+                letter-spacing: -0.4px;
+                margin-bottom: 10px;
+            }
+
+            .sub {
+                font-size: 14px;
+                color: var(--muted);
+                margin-bottom: 36px;
+                line-height: 1.6;
+            }
+
+            /* Loading / error states */
+            .state {
+                font-size: 13px;
+                color: var(--muted);
+                padding: 24px 0;
+                display: none;
+            }
+            .state.visible {
+                display: block;
+            }
+
+            /* List */
+            .list {
+                display: none;
+            }
+            .list.visible {
+                display: block;
+            }
+
+            .item {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 14px 0;
+                border-bottom: 1px solid var(--line);
+                text-decoration: none;
+                color: var(--text);
+                transition: opacity 0.15s;
+                cursor: pointer;
+            }
+
+            .item:first-child {
+                border-top: 1px solid var(--line);
+            }
+
+            .item:hover {
+                opacity: 0.55;
+            }
+
+            .item-left {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+            }
+
+            .favicon {
+                width: 18px;
+                height: 18px;
+                border-radius: 3px;
+                object-fit: contain;
+                opacity: 0.85;
+                flex-shrink: 0;
+            }
+
+            .favicon-placeholder {
+                width: 18px;
+                height: 18px;
+                border-radius: 3px;
+                background: var(--line);
+                flex-shrink: 0;
+            }
+
+            .domain {
+                font-size: 14px;
+                font-weight: 400;
+            }
+
+            .arrow {
+                font-size: 13px;
+                color: var(--muted);
+            }
+
+            /* Back link */
+            .back {
+                display: inline-block;
+                margin-top: 28px;
+                font-size: 13px;
+                color: var(--muted);
+                text-decoration: none;
+                border-bottom: 1px solid var(--line);
+                padding-bottom: 1px;
+                transition:
+                    color 0.2s,
+                    border-color 0.2s;
+            }
+            .back:hover {
+                color: var(--text);
+                border-color: var(--text);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="wrap">
+            <div class="rule"></div>
+            <h1>Accessible sites</h1>
+            <p class="sub">
+                These sites are available on this device. Click any to open.
+            </p>
+
+            <div class="state" id="loading">Loading...</div>
+            <div class="state" id="error">
+                Could not load the list. Make sure the device is connected.
+            </div>
+
+            <div class="list" id="list"></div>
+
+            <a class="back" href="blocked.html">Go back</a>
+        </div>
+
+        <script src="allowlist.js"></script>
+    </body>
+</html>

@@ -1,11 +1,12 @@
-const BLOCKED_PAGE = browser.runtime.getURL("blocked.html");
+const BLOCKED_PAGE = chrome.runtime.getURL("blocked.html");
 
+// Guard: skip URLs we generated ourselves
 function isSafeToCheck(url) {
   if (!url) return false;
+  if (url.startsWith("chrome://")) return false;
+  if (url.startsWith("chrome-extension://")) return false;
   if (url.startsWith("about:")) return false;
-  if (url.startsWith("moz-extension://")) return false; // ← firefox equivalent of chrome-extension://
   if (url.startsWith("data:")) return false;
-  if (url.startsWith("file:")) return false;
   return true;
 }
 
@@ -17,29 +18,32 @@ async function checkWithBackend(url) {
       body: JSON.stringify({ url, timestamp: Date.now() }),
     });
     const data = await res.json();
+    console.log("[SENTRY] Check result:", data);
     return data.allowed;
   } catch (err) {
-    console.log("[SENTINEL] Backend unreachable", err);
-    return false; // fail closed
+    console.log("[SENTRY] Backend unreachable", err);
+    return false;
   }
 }
 
 async function handleNavigation(details) {
-  if (details.frameId !== 0) return;
+  if (details.frameId !== 0) return; // main frame only
   const url = details.url;
 
-  if (!isSafeToCheck(url)) return;
+  if (!isSafeToCheck(url)) return; // skip our own redirects
 
   const allowed = await checkWithBackend(url);
 
   if (!allowed) {
     console.log("[SENTINEL] Blocked:", url);
-    // Firefox requires tabs permission and uses browser.tabs
-    browser.tabs.update(details.tabId, {
+    chrome.tabs.update(details.tabId, {
       url: `${BLOCKED_PAGE}?url=${encodeURIComponent(url)}`,
     });
   }
 }
 
-browser.webNavigation.onBeforeNavigate.addListener(handleNavigation);
-browser.webNavigation.onHistoryStateUpdated.addListener(handleNavigation);
+// Handles normal navigations
+chrome.webNavigation.onBeforeNavigate.addListener(handleNavigation);
+
+// Handles SPA navigations (YouTube, etc.)
+chrome.webNavigation.onHistoryStateUpdated.addListener(handleNavigation);

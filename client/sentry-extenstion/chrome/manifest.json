@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Sentinel",
+  "version": "1.0",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "webNavigation",
+    "webRequest",
+    "tabs",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": ["<all_urls>"]
+}

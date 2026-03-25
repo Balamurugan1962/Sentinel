@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Page Unavailable</title>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;1,9..144,300&family=DM+Sans:wght@300;400&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            :root {
+                --bg: #f7f6f3;
+                --text: #1a1916;
+                --muted: #9c9a95;
+                --line: #e2e0da;
+                --accent: #c0392b;
+            }
+
+            html,
+            body {
+                height: 100%;
+            }
+
+            body {
+                background: var(--bg);
+                color: var(--text);
+                font-family: "DM Sans", sans-serif;
+                font-weight: 300;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 24px;
+            }
+
+            .wrap {
+                max-width: 400px;
+                width: 100%;
+                opacity: 0;
+                transform: translateY(10px);
+                animation: appear 0.5s ease 0.1s forwards;
+            }
+
+            @keyframes appear {
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
+            .rule {
+                width: 32px;
+                height: 2px;
+                background: var(--accent);
+                margin-bottom: 32px;
+            }
+
+            h1 {
+                font-family: "Fraunces", serif;
+                font-size: clamp(26px, 5vw, 34px);
+                font-weight: 300;
+                line-height: 1.25;
+                letter-spacing: -0.4px;
+                margin-bottom: 14px;
+            }
+
+            p {
+                font-size: 14px;
+                line-height: 1.7;
+                color: var(--muted);
+                margin-bottom: 36px;
+            }
+
+            .divider {
+                height: 1px;
+                background: var(--line);
+                margin-bottom: 24px;
+            }
+
+            .site-row {
+                display: flex;
+                align-items: baseline;
+                justify-content: space-between;
+                gap: 16px;
+                margin-bottom: 24px;
+            }
+
+            .site-label {
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+                color: var(--muted);
+                white-space: nowrap;
+            }
+
+            .site-value {
+                font-family: "Fraunces", serif;
+                font-style: italic;
+                font-size: 15px;
+                font-weight: 300;
+                color: var(--text);
+                text-align: right;
+                word-break: break-all;
+            }
+
+            .allowlist-link {
+                display: inline-block;
+                font-size: 13px;
+                color: var(--muted);
+                text-decoration: none;
+                border-bottom: 1px solid var(--line);
+                padding-bottom: 1px;
+                transition:
+                    color 0.2s,
+                    border-color 0.2s;
+            }
+
+            .allowlist-link:hover {
+                color: var(--text);
+                border-color: var(--text);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="wrap">
+            <div class="rule"></div>
+            <h1>This page isn't available right now.</h1>
+            <p>
+                This site is blocked on your device. Your attempt to visit it
+                has been reported to your administrator.
+            </p>
+
+            <div class="divider"></div>
+
+            <div class="site-row">
+                <span class="site-label">Requested</span>
+                <span class="site-value" id="url-display">—</span>
+            </div>
+
+            <a class="allowlist-link" href="allowlist.html"
+                >View accessible sites</a
+            >
+        </div>
+
+        <script src="blocked.js"></script>
+    </body>
+</html>
