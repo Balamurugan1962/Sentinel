@@ -48,7 +48,7 @@ async fn create_kafka_producer(kafka_ip: &str) -> FutureProducer {
 }
 
 pub async fn browser_monitor(rx: mpsc::Receiver<String>, shutdown_tx: broadcast::Receiver<()>) {
-    let kafka_ip = "127.0.0.1:9092";
+    let kafka_ip = "10.106.192.86:9092";
     let producer = create_kafka_producer(kafka_ip).await;
 
     let allowlist = RwLock::new(
